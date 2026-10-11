@@ -1,0 +1,11 @@
+{
+  "appId": "com.smartaccounting.mobile",
+  "appName": "智能记账",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

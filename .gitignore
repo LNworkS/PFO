@@ -1,0 +1,36 @@
+# ===== 构建环境（体积巨大，绝不入库）=====
+/android-sdk/
+/jdk21/
+/mobile-app/.gradle-home/
+/mobile-app/node_modules/
+/electron-app/node_modules/
+
+# ===== Android 构建产物 =====
+/mobile-app/android/.gradle/
+/mobile-app/android/build/
+/mobile-app/android/app/build/
+/mobile-app/android/capacitor-cordova-android-plugins/
+/mobile-app/android/app/src/main/assets/public/
+/mobile-app/android/local.properties
+/mobile-app/android/.idea/
+*.iml
+.cxx/
+
+# ===== 签名凭据（绝不入库）=====
+/mobile-app/android/keystore/
+/mobile-app/android/keystore.properties
+*.jks
+*.keystore
+
+# ===== Electron 构建产物 =====
+/electron-app/dist/
+/electron-app/out/
+
+# ===== 临时文件 =====
+*.log
+*.tmp
+Thumbs.db
+.DS_Store
+
+# 根目录下的临时构建产物（正式安装包归档在 releases/）
+/智能记账.apk

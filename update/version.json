@@ -1,0 +1,8 @@
+{
+  "versionCode": 1,
+  "versionName": "1.0.0",
+  "apkUrl": "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.0.apk",
+  "apkUrlFallback": "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.0.apk",
+  "changelog": "首个正式版本\n· 收支记录与自定义分类（支持增删改）\n· 多账户与转账，余额可手动校准\n· 银行挂牌利率自动计息，利率随官网每日刷新\n· 预算管理与超支提醒\n· 统计报表与趋势图\n· 本地密码保护，数据经 AES-256-GCM 加密\n· 支持加密导出 / 导入实现多端同步\n· 新增应用内更新检测",
+  "publishedAt": "2026-10-11"
+}
