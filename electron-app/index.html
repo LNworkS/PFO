@@ -767,26 +767,47 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
         <select class="form-select" id="depositTypeSelect" onchange="updateRatePreview()"></select>
       </div>
       <div class="form-group" id="fundCodeGroup" style="display:none;">
-        <label class="form-label">货币基金代码</label>
-        <input type="text" class="form-input" id="accountFundCode" list="fundCodePresets" placeholder="如：000198" oninput="updateRatePreview()">
-        <datalist id="fundCodePresets">
-          <option value="000198">天弘余额宝货币</option>
-          <option value="000359">易方达易理财货币A</option>
-          <option value="003003">华夏现金增利货币A</option>
-          <option value="000343">华夏财富宝货币A</option>
-        </datalist>
-        <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;">7 日年化收益率按此基金的公开行情每日自动刷新</div>
+        <label class="form-label">理财产品名称</label>
+        <div style="display:flex;gap:8px;">
+          <input type="text" class="form-input" id="accountProductName" placeholder="如：朝朝盈 / 余额宝" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchMoneyProduct();}">
+          <button type="button" class="btn btn-secondary" style="padding:0 16px;white-space:nowrap;" onclick="searchMoneyProduct()">匹配</button>
+        </div>
+        <div id="productMatchResults" style="margin-top:8px;"></div>
+        <div class="form-group" style="margin-top:10px;">
+          <label class="form-label">基金代码</label>
+          <input type="text" class="form-input" id="accountFundCode" list="fundCodePresets" placeholder="如：000198" oninput="onFundCodeInput()">
+          <datalist id="fundCodePresets">
+            <option value="000198">天弘余额宝货币</option>
+            <option value="000359">易方达易理财货币A</option>
+            <option value="003003">华夏现金增利货币A</option>
+            <option value="000343">华夏财富宝货币A</option>
+            <option value="000588">招商招钱宝货币A</option>
+            <option value="000607">招商招钱宝货币B</option>
+          </datalist>
+        </div>
+        <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;" id="matchedFundHint">7 日年化收益率按此基金的公开行情每日自动刷新</div>
       </div>
       <div class="form-group" id="manualRateGroup" style="display:none;">
-        <label class="form-label">自定义年化利率（%）</label>
+        <label class="form-label" id="manualRateLabel">自定义年化利率（%）</label>
         <div class="rate-input-wrap">
-          <input type="number" class="form-input" id="accountInterestRate" placeholder="0.00" step="0.01" min="0" max="100" style="flex:1;">
+          <input type="number" class="form-input" id="accountInterestRate" placeholder="0.00" step="0.01" min="0" max="100" style="flex:1;" oninput="updateRatePreview()">
           <span class="rate-suffix">%</span>
+        </div>
+        <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;" id="manualRateHint"></div>
+      </div>
+      <div class="form-group" id="estateGroup" style="display:none;">
+        <label class="form-label">不动产类型</label>
+        <select class="form-select" id="estateKindSelect">
+          <option value="house">房产（按小区近一月二手成交均价估值）</option>
+          <option value="vehicle">车辆（按同款二手车近一周成交均价估值）</option>
+        </select>
+        <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;">
+          成交价暂无免费公开接口，请手动填写下方「当前估值」；无新数据时维持上一次估值不变，每月 1 日会提醒更新。
         </div>
       </div>
       <div class="form-group" id="ratePreviewGroup" style="display:none;">
         <div style="background:var(--primary-bg);border-radius:var(--radius-sm);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-size:.82rem;color:var(--text-2);">当前适用利率</span>
+          <span style="font-size:.82rem;color:var(--text-2);" id="ratePreviewLabel">当前适用利率</span>
           <span style="font-size:1.1rem;font-weight:700;color:var(--primary);" id="ratePreviewValue">—</span>
         </div>
         <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;" id="ratePreviewSource"></div>
@@ -1046,18 +1067,33 @@ const Store = {
     const today = fmt.dateFull(new Date());
     this.data.accounts.forEach(a => {
       if (a.lastInterestDate === undefined) a.lastInterestDate = today;
-      // 迁移旧账户结构到新银行/存款类型结构
-      if (a.bankId === undefined && a.type === 'bank') {
-        a.bankId = 'ccb';
-        a.depositType = 'current';
+
+      // 旧类型 → 新类型映射
+      if (a.type === 'bank') {
+        a.type = (a.depositType && a.depositType !== 'current') ? 'fixed' : 'demand';
       }
-      if (a.type === 'credit') {
-        a.type = 'other';
-        a.interestRate = a.interestRate || 0;
+      if (a.type === 'alipay') { a.type = 'money'; if (!a.fundName) a.fundName = '天弘余额宝货币'; }
+      if (a.type === 'wechat') { a.type = 'money'; if (!a.fundName) a.fundName = '易方达易理财货币A'; }
+      if (a.type === 'other') a.type = 'account';
+      if (a.type === 'credit') a.type = 'creditcard';
+
+      // 银行类补充默认银行与存款类型
+      if (a.type === 'demand' || a.type === 'fixed') {
+        if (!a.bankId) a.bankId = 'ccb';
+        if (!a.depositType) a.depositType = a.type === 'demand' ? 'current' : 'fixed_1y';
+        if (a.type === 'demand') a.depositType = 'current';
       }
-      // 货币基金账户补充默认基金代码
-      if (a.type === 'alipay' || a.type === 'wechat') {
-        if (!a.fundCode) a.fundCode = DEFAULT_FUND_CODE[a.type];
+      // 货币理财补充默认基金代码
+      if (a.type === 'money') {
+        if (!a.fundCode) a.fundCode = DEFAULT_FUND_CODE[a.type] || '000198';
+      }
+      // 不动产补充子类型
+      if (a.type === 'estate' && !a.estateKind) a.estateKind = 'house';
+
+      // 负债余额统一存为负数（欠款为负）
+      const t = ACCOUNT_TYPES.find(x => x.id === a.type);
+      if (t && t.side === 'liability') {
+        a.balance = -Math.abs(a.balance || 0);
       }
     });
   },
@@ -1079,9 +1115,11 @@ const Store = {
       const lastDate = new Date(lastStr + 'T00:00:00');
       const totalDays = Math.floor((today - lastDate) / 86400000);
       if (totalDays <= 0) return;
+      if (accTypeOf(acc).rateKind === 'estate' || accTypeOf(acc).rateKind === 'none') { acc.lastInterestDate = todayStr; return; }
 
-      // 逐日按历史利率复利计息
-      let balance = acc.balance;
+      const liability = isLiability(acc);
+      // 本金取绝对值：负债存为负数，单独计息后回写为更小的负数（欠款增加）
+      let principal = Math.abs(acc.balance);
       let accInterest = 0;
       for (let i = 0; i < totalDays; i++) {
         const d = new Date(lastDate);
@@ -1089,24 +1127,24 @@ const Store = {
         const dateStr = fmt.dateFull(d);
         const annualRate = getRateForDate(acc, dateStr);
         if (annualRate <= 0) continue;
-        const dailyInterest = balance * (annualRate / 100 / 365);
-        balance += dailyInterest;
+        const dailyInterest = principal * (annualRate / 100 / 365);
+        principal += dailyInterest;
         accInterest += dailyInterest;
       }
 
       accInterest = Math.round(accInterest * 100) / 100;
       if (accInterest > 0.005) {
-        acc.balance = Math.round(balance * 100) / 100;
+        acc.balance = liability ? -Math.round(principal * 100) / 100 : Math.round(principal * 100) / 100;
         totalInterest += accInterest;
         const rateInfo = getAccountRateInfo(acc);
         newTxns.push({
           id: 'txn_int_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
-          type: 'income',
+          type: liability ? 'expense' : 'income',
           amount: accInterest,
-          category: 'invest',
+          category: liability ? 'other_exp' : 'invest',
           accountId: acc.id,
           date: todayStr,
-          note: `自动计息 · ${acc.name}（${rateInfo.source}，${totalDays}天）`,
+          note: `${liability ? '自动计息（资金成本）' : '自动计息'} · ${acc.name}（${rateInfo.source}，${totalDays}天）`,
           isAutoInterest: true,
           createdAt: new Date().toISOString()
         });
@@ -1133,8 +1171,8 @@ const Store = {
       transactions: [],
       accounts: [
         { id: 'acc_cash', name: '现金', type: 'cash', balance: 0, lastInterestDate: today },
-        { id: 'acc_alipay', name: '余额宝', type: 'alipay', balance: 0, lastInterestDate: today },
-        { id: 'acc_wechat', name: '零钱通', type: 'wechat', balance: 0, lastInterestDate: today },
+        { id: 'acc_alipay', name: '余额宝', type: 'money', balance: 0, fundCode: '000198', fundName: '天弘余额宝货币', lastInterestDate: today },
+        { id: 'acc_wechat', name: '零钱通', type: 'money', balance: 0, fundCode: '000359', fundName: '易方达易理财货币A', lastInterestDate: today },
       ],
       categories: {
         expense: [
@@ -1570,13 +1608,38 @@ const CATEGORIES = {
   ],
 };
 
+/**
+ * 账户类型体系（12 类，分资产/负债）
+ * side: asset 资产 / liability 负债
+ * rateKind:
+ *   none       不计息
+ *   bank_demand 银行挂牌活期利率
+ *   bank_fixed  银行挂牌定期利率（depositType）
+ *   fund        货币理财，按公开行情源每日刷新（fundCode）
+ *   manual      手动年化利率（interestRate）
+ *   estate      不动产估值（无利息，手动估值 + 估值历史）
+ */
 const ACCOUNT_TYPES = [
-  { id: 'cash', name: '现金', emoji: '💵' },
-  { id: 'bank', name: '银行储蓄', emoji: '🏦' },
-  { id: 'alipay', name: '余额宝', emoji: '💳' },
-  { id: 'wechat', name: '零钱通', emoji: '💚' },
-  { id: 'other', name: '其他', emoji: '📦' },
+  // —— 资产 ——
+  { id: 'cash',       name: '现金',     emoji: '💵', side: 'asset',     rateKind: 'none' },
+  { id: 'demand',     name: '活期储蓄', emoji: '🏦', side: 'asset',     rateKind: 'bank_demand' },
+  { id: 'fixed',      name: '定期存款', emoji: '🔒', side: 'asset',     rateKind: 'bank_fixed' },
+  { id: 'money',      name: '货币理财', emoji: '💳', side: 'asset',     rateKind: 'fund' },
+  { id: 'account',    name: '账户',     emoji: '📂', side: 'asset',     rateKind: 'manual' },
+  { id: 'stock',      name: '股票',     emoji: '📈', side: 'asset',     rateKind: 'manual' },
+  { id: 'insurance',  name: '保险',     emoji: '🛡️', side: 'asset',     rateKind: 'manual' },
+  { id: 'estate',     name: '不动产',   emoji: '🏠', side: 'asset',     rateKind: 'estate' },
+  { id: 'receivable', name: '应收款',   emoji: '📥', side: 'asset',     rateKind: 'none' },
+  // —— 负债 ——
+  { id: 'creditcard', name: '信用卡',   emoji: '💳', side: 'liability', rateKind: 'manual' },
+  { id: 'loan',       name: '贷款',     emoji: '🏛️', side: 'liability', rateKind: 'manual' },
+  { id: 'borrow',     name: '其他借款', emoji: '🤝', side: 'liability', rateKind: 'none' },
 ];
+
+function accTypeOf(acc) {
+  return ACCOUNT_TYPES.find(t => t.id === acc.type) || { id: acc.type, name: '账户', emoji: '📦', side: 'asset', rateKind: 'manual' };
+}
+function isLiability(acc) { return accTypeOf(acc).side === 'liability'; }
 
 /* ============================================================
  * 官方利率数据库
@@ -1610,6 +1673,29 @@ const DEPOSIT_TYPES = [
   { id: 'notice_1d', name: '通知存款一天', emoji: '📅' },
   { id: 'notice_7d', name: '通知存款七天', emoji: '📅' },
 ];
+
+// 定期存款可选期限（不含活期）
+const FIXED_DEPOSIT_TYPES = DEPOSIT_TYPES.filter(d => d.id !== 'current');
+
+// 不动产子类型
+const ESTATE_KINDS = [
+  { id: 'house', name: '房产' },
+  { id: 'vehicle', name: '车辆' },
+];
+
+/**
+ * 银行零钱/理财产品别名表：产品品牌名 → 底层货币基金候选
+ * 银行自有品牌（如「朝朝盈」）在东财联想接口中搜不到，需本地映射
+ */
+const BANK_PRODUCT_ALIAS = {
+  '朝朝盈': [
+    { code: '000588', name: '招商招钱宝货币A' },
+    { code: '000607', name: '招商招钱宝货币B' },
+  ],
+  '朝朝宝': [{ code: '000588', name: '招商招钱宝货币A' }],
+  '余额宝': [{ code: '000198', name: '天弘余额宝货币' }],
+  '零钱通': [{ code: '000359', name: '易方达易理财货币A' }],
+};
 
 // 五大行及股份制银行挂牌利率（年化%），按生效日期排列
 const BIG5_RATES = {
@@ -1706,30 +1792,44 @@ const RATE_TABLES = { big5: BIG5_RATES, psbc: PSBC_RATES };
 
 /**
  * 查询指定日期的适用利率
- * @param {object} acc - 账户对象 { type, bankId, depositType, interestRate }
+ * @param {object} acc - 账户对象
  * @param {string} dateStr - YYYY-MM-DD 格式日期
  * @returns {number} 年化利率（%），0 表示不计息
  */
 function getRateForDate(acc, dateStr) {
-  if (acc.type === 'cash') return 0;
-  if (acc.type === 'other') return acc.interestRate || 0;
-
-  if (acc.type === 'alipay' || acc.type === 'wechat') {
-    const code = acc.fundCode || DEFAULT_FUND_CODE[acc.type];
-    // 优先用实时行情；取不到时回退到内置近似表
-    const live = RateFeed.rateOn(code, dateStr);
-    if (live !== null) return live;
-    return lookupRate(acc.type === 'alipay' ? YUEBAO_RATES : LINGQIAN_RATES, dateStr);
-  }
-  if (acc.type === 'bank') {
-    const bank = BANKS.find(b => b.id === acc.bankId);
-    if (!bank || !acc.depositType) return 0;
-    const table = RATE_TABLES[bank.group] || RATE_TABLES.big5;
-    const rates = table[acc.depositType];
-    if (!rates) return 0;
-    return lookupRate(rates, dateStr);
+  const t = accTypeOf(acc);
+  switch (t.rateKind) {
+    case 'none':
+    case 'estate':
+      return 0;
+    case 'manual':
+      return acc.interestRate || 0;
+    case 'fund': {
+      if (!acc.fundCode) return 0;
+      const live = RateFeed.rateOn(acc.fundCode, dateStr);
+      if (live !== null) return live;
+      return lookupRate(fallbackFundTable(acc.fundCode), dateStr);
+    }
+    case 'bank_demand':
+    case 'bank_fixed': {
+      const bank = BANKS.find(b => b.id === acc.bankId);
+      if (!bank) return 0;
+      const dep = t.rateKind === 'bank_demand' ? 'current' : acc.depositType;
+      if (!dep) return 0;
+      const table = RATE_TABLES[bank.group] || RATE_TABLES.big5;
+      const rates = table[dep];
+      if (!rates) return 0;
+      return lookupRate(rates, dateStr);
+    }
   }
   return 0;
+}
+
+// 行情源不可用时的内置近似回退（仅余额宝/零钱通对应基金）
+function fallbackFundTable(code) {
+  if (code === '000198') return YUEBAO_RATES;
+  if (code === '000359') return LINGQIAN_RATES;
+  return [];
 }
 
 function lookupRate(rateArray, dateStr) {
@@ -1745,24 +1845,64 @@ function lookupRate(rateArray, dateStr) {
  * 获取账户当前利率和来源描述
  */
 function getAccountRateInfo(acc) {
-  if (acc.type === 'cash') return { rate: 0, source: '现金不计息' };
-  if (acc.type === 'other') return { rate: acc.interestRate || 0, source: '自定义利率' };
-  if (acc.type === 'alipay' || acc.type === 'wechat') {
-    const code = acc.fundCode || DEFAULT_FUND_CODE[acc.type];
-    const today = fmt.dateFull(new Date());
-    const label = acc.type === 'alipay' ? '余额宝7日年化' : '零钱通7日年化';
-    const live = RateFeed.rateOn(code, today);
-    if (live !== null) return { rate: live, source: `${label}（${code}·实时）` };
-    const r = lookupRate(acc.type === 'alipay' ? YUEBAO_RATES : LINGQIAN_RATES, today);
-    return { rate: r, source: `${label}（${code}·内置近似）` };
-  }
-  if (acc.type === 'bank') {
-    const bank = BANKS.find(b => b.id === acc.bankId);
-    const dep = DEPOSIT_TYPES.find(d => d.id === acc.depositType);
-    const r = getRateForDate(acc, fmt.dateFull(new Date()));
-    return { rate: r, source: `${bank?.short || ''}${dep?.name || ''}挂牌利率` };
+  const t = accTypeOf(acc);
+  const today = fmt.dateFull(new Date());
+  switch (t.rateKind) {
+    case 'none':
+      return { rate: 0, source: t.id === 'cash' ? '现金不计息' : '该类型不计息' };
+    case 'estate': {
+      const kind = (ESTATE_KINDS.find(k => k.id === acc.estateKind) || {}).name || '不动产';
+      return { rate: 0, source: `${kind}估值 · 手动维护` };
+    }
+    case 'manual':
+      return { rate: acc.interestRate || 0, source: isLiability(acc) ? '自定义资金成本利率' : '自定义年化利率' };
+    case 'fund': {
+      const code = acc.fundCode || '';
+      if (!code) return { rate: 0, source: '未设置货币基金' };
+      const name = acc.fundName ? ` · ${acc.fundName}` : '';
+      const live = RateFeed.rateOn(code, today);
+      if (live !== null) return { rate: live, source: `货币基金7日年化（${code}${name}·实时）` };
+      const r = lookupRate(fallbackFundTable(code), today);
+      if (r > 0) return { rate: r, source: `货币基金7日年化（${code}${name}·内置近似）` };
+      return { rate: 0, source: `货币基金7日年化（${code}${name}·行情待刷新）` };
+    }
+    case 'bank_demand':
+    case 'bank_fixed': {
+      const bank = BANKS.find(b => b.id === acc.bankId);
+      const depId = t.rateKind === 'bank_demand' ? 'current' : acc.depositType;
+      const dep = DEPOSIT_TYPES.find(d => d.id === depId);
+      const r = getRateForDate(acc, today);
+      return { rate: r, source: `${bank?.short || ''}${dep?.name || ''}挂牌利率` };
+    }
   }
   return { rate: 0, source: '' };
+}
+
+/* ============================================================
+ * 理财产品名称匹配
+ * ① 本地别名表（银行自有品牌 → 底层货币基金）
+ * ② 东方财富基金联想接口按关键词搜索
+ * ============================================================ */
+function matchProductAlias(keyword) {
+  const norm = (keyword || '').replace(/\s/g, '');
+  if (!norm) return null;
+  for (const key of Object.keys(BANK_PRODUCT_ALIAS)) {
+    if (norm.includes(key) || key.includes(norm)) return BANK_PRODUCT_ALIAS[key];
+  }
+  return null;
+}
+
+async function searchFundByKeyword(keyword) {
+  const url = `https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?m=1&key=${encodeURIComponent(keyword)}&_=${Date.now()}`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const j = await res.json();
+  const arr = (j && j.Datas) || [];
+  return arr.map(x => ({
+    code: x.CODE,
+    name: x.NAME,
+    type: (x.FundBaseInfo && x.FundBaseInfo.FTYPE) || '',
+  })).filter(x => x.code && x.name);
 }
 
 /* ============================================================
@@ -1969,36 +2109,44 @@ function saveTxn() {
  * ============================================================ */
 let selectedAccType = 'cash';
 let editingAccountId = null;
+let pendingFund = null; // {code, name} 匹配命中的货币基金
 
 function openAccountModal(accountId) {
   editingAccountId = accountId || null;
   const isEdit = !!accountId;
+  pendingFund = null;
   document.getElementById('accountModalTitle').textContent = isEdit ? '编辑账户' : '添加账户';
   document.getElementById('accountName').value = '';
   document.getElementById('accountBalance').value = '';
   document.getElementById('accountInterestRate').value = '';
   document.getElementById('accountFundCode').value = '';
+  document.getElementById('accountProductName').value = '';
+  document.getElementById('productMatchResults').innerHTML = '';
+  document.getElementById('matchedFundHint').textContent = '7 日年化收益率按此基金的公开行情每日自动刷新';
+  document.getElementById('estateKindSelect').value = 'house';
   document.getElementById('balanceLabel').textContent = '初始余额';
   document.getElementById('balanceEditHint').style.display = 'none';
   selectedAccType = 'cash';
 
-  // 填充银行和存款类型下拉
+  // 填充银行和定期类型下拉
   document.getElementById('bankSelect').innerHTML = BANKS.map(b =>
     `<option value="${b.id}">${b.name}</option>`).join('');
-  document.getElementById('depositTypeSelect').innerHTML = DEPOSIT_TYPES.map(d =>
+  document.getElementById('depositTypeSelect').innerHTML = FIXED_DEPOSIT_TYPES.map(d =>
     `<option value="${d.id}">${d.emoji} ${d.name}</option>`).join('');
 
   if (isEdit) {
     const acc = Store.getAccount(accountId);
     if (acc) {
+      const t = accTypeOf(acc);
       document.getElementById('accountName').value = acc.name;
-      document.getElementById('accountBalance').value = acc.balance;
-      document.getElementById('balanceLabel').textContent = '账户余额';
+      document.getElementById('accountBalance').value = Math.abs(acc.balance);
       document.getElementById('balanceEditHint').style.display = 'block';
       document.getElementById('accountInterestRate').value = acc.interestRate || '';
       document.getElementById('accountFundCode').value = acc.fundCode || '';
+      if (acc.fundCode) pendingFund = { code: acc.fundCode, name: acc.fundName || '' };
       if (acc.bankId) document.getElementById('bankSelect').value = acc.bankId;
-      if (acc.depositType) document.getElementById('depositTypeSelect').value = acc.depositType;
+      if (acc.depositType && acc.depositType !== 'current') document.getElementById('depositTypeSelect').value = acc.depositType;
+      if (acc.estateKind) document.getElementById('estateKindSelect').value = acc.estateKind;
       selectedAccType = acc.type;
     }
   }
@@ -2009,12 +2157,15 @@ function openAccountModal(accountId) {
 
 function renderAccTypeGrid() {
   const grid = document.getElementById('accountTypeGrid');
-  grid.innerHTML = ACCOUNT_TYPES.map(t => `
+  const chip = t => `
     <button class="cat-chip ${selectedAccType === t.id ? 'selected' : ''}" onclick="selectAccType('${t.id}')">
       <span class="emoji">${t.emoji}</span>
       <span class="name">${t.name}</span>
-    </button>
-  `).join('');
+    </button>`;
+  const group = (title, side) =>
+    `<div style="grid-column:1/-1;font-size:.72rem;color:var(--text-3);margin:2px 0 -2px;">${title}</div>` +
+    ACCOUNT_TYPES.filter(t => t.side === side).map(chip).join('');
+  grid.innerHTML = group('资产', 'asset') + group('负债', 'liability');
 }
 
 function selectAccType(id) {
@@ -2024,85 +2175,155 @@ function selectAccType(id) {
 }
 
 function updateAccTypeFields() {
-  const bankGroup = document.getElementById('bankSelectGroup');
-  const depGroup = document.getElementById('depositTypeGroup');
-  const fundGroup = document.getElementById('fundCodeGroup');
-  const manualGroup = document.getElementById('manualRateGroup');
-  const ratePreview = document.getElementById('ratePreviewGroup');
+  const t = ACCOUNT_TYPES.find(x => x.id === selectedAccType) || ACCOUNT_TYPES[0];
+  const isLiab = t.side === 'liability';
 
-  const isFund = (selectedAccType === 'alipay' || selectedAccType === 'wechat');
-  bankGroup.style.display = (selectedAccType === 'bank') ? 'block' : 'none';
-  depGroup.style.display = (selectedAccType === 'bank') ? 'block' : 'none';
-  manualGroup.style.display = (selectedAccType === 'other') ? 'block' : 'none';
-  fundGroup.style.display = isFund ? 'block' : 'none';
-  // 货币基金账户填入默认基金代码
-  if (isFund) {
-    const inp = document.getElementById('accountFundCode');
-    if (!inp.value) inp.value = DEFAULT_FUND_CODE[selectedAccType];
+  document.getElementById('bankSelectGroup').style.display = (t.rateKind === 'bank_demand' || t.rateKind === 'bank_fixed') ? 'block' : 'none';
+  document.getElementById('depositTypeGroup').style.display = (t.rateKind === 'bank_fixed') ? 'block' : 'none';
+  document.getElementById('manualRateGroup').style.display = (t.rateKind === 'manual') ? 'block' : 'none';
+  document.getElementById('fundCodeGroup').style.display = (t.rateKind === 'fund') ? 'block' : 'none';
+  document.getElementById('estateGroup').style.display = (t.rateKind === 'estate') ? 'block' : 'none';
+
+  document.getElementById('manualRateLabel').textContent = isLiab ? '资金成本年化利率（%）' : '自定义年化利率（%）';
+  document.getElementById('manualRateHint').textContent = isLiab ? '按此利率逐日计息，计入负债（欠款增加）' : '按此利率逐日计息，计入理财收益';
+
+  const balLabel = document.getElementById('balanceLabel');
+  if (editingAccountId) {
+    balLabel.textContent = isLiab ? '欠款金额' : (t.rateKind === 'estate' ? '当前估值' : '账户余额');
+  } else {
+    balLabel.textContent = isLiab ? '欠款金额' : (t.rateKind === 'estate' ? '当前估值' : '初始余额');
   }
-  ratePreview.style.display = (selectedAccType === 'bank' || selectedAccType === 'alipay' || selectedAccType === 'wechat') ? 'block' : 'none';
 
+  document.getElementById('ratePreviewGroup').style.display = (t.rateKind === 'none' || t.rateKind === 'estate') ? 'none' : 'block';
   updateRatePreview();
 }
 
 function updateRatePreview() {
-  if (selectedAccType === 'cash' || selectedAccType === 'other') return;
+  const grp = document.getElementById('ratePreviewGroup');
+  if (!grp || grp.style.display === 'none') return;
+  const t = ACCOUNT_TYPES.find(x => x.id === selectedAccType) || ACCOUNT_TYPES[0];
   const tempAcc = {
     type: selectedAccType,
     bankId: document.getElementById('bankSelect')?.value,
-    depositType: document.getElementById('depositTypeSelect')?.value,
+    depositType: t.rateKind === 'bank_demand' ? 'current' : document.getElementById('depositTypeSelect')?.value,
     fundCode: document.getElementById('accountFundCode')?.value || undefined,
+    fundName: pendingFund ? pendingFund.name : undefined,
+    interestRate: parseFloat(document.getElementById('accountInterestRate')?.value) || 0,
   };
   const info = getAccountRateInfo(tempAcc);
-  document.getElementById('ratePreviewValue').textContent = info.rate > 0 ? info.rate + '%' : '不计息';
+  document.getElementById('ratePreviewLabel').textContent = t.side === 'liability' ? '当前资金成本' : '当前适用利率';
+  document.getElementById('ratePreviewValue').textContent = info.rate > 0 ? info.rate + '%' : '待刷新';
   document.getElementById('ratePreviewSource').textContent = info.source ? `来源：${info.source}` : '';
+}
+
+/* ---------- 理财产品名称匹配 ---------- */
+function onFundCodeInput() {
+  const code = document.getElementById('accountFundCode').value.trim();
+  const keepName = pendingFund && pendingFund.code === code ? pendingFund.name : '';
+  pendingFund = code ? { code, name: keepName } : null;
+  if (keepName) document.getElementById('matchedFundHint').textContent = `已匹配：${keepName}（${code}）`;
+  updateRatePreview();
+}
+
+function setMatchedFund(f) {
+  pendingFund = { code: f.code, name: f.name };
+  document.getElementById('accountFundCode').value = f.code;
+  document.getElementById('matchedFundHint').textContent = `已匹配：${f.name}（${f.code}），7 日年化按行情每日刷新`;
+  document.getElementById('productMatchResults').innerHTML = '';
+  updateRatePreview();
+}
+
+function renderProductCandidates(list, tip) {
+  const box = document.getElementById('productMatchResults');
+  box._candidates = list;
+  box.innerHTML = `<div style="font-size:.74rem;color:var(--text-3);margin-bottom:6px;">${tip || '匹配到多个结果，请选择确认：'}</div>` +
+    list.map((f, i) => `
+      <button type="button" class="cat-chip" style="flex-direction:row;justify-content:flex-start;gap:10px;padding:8px 12px;text-align:left;" onclick="pickProductCandidate(${i})">
+        <span class="name" style="font-weight:600;color:var(--text-1);">${escapeHtml(f.name)}</span>
+        <span class="name">${f.code}</span>
+        ${f.type ? `<span class="name" style="margin-left:auto;">${escapeHtml(f.type)}</span>` : ''}
+      </button>`).join('');
+}
+
+function pickProductCandidate(i) {
+  const box = document.getElementById('productMatchResults');
+  const list = box._candidates || [];
+  if (list[i]) setMatchedFund(list[i]);
+}
+
+async function searchMoneyProduct() {
+  const kw = document.getElementById('accountProductName').value.trim();
+  const box = document.getElementById('productMatchResults');
+  if (!kw) { toast('请输入理财产品名称'); return; }
+
+  // ① 本地别名表（银行自有品牌，如「朝朝盈」）
+  const alias = matchProductAlias(kw);
+  if (alias && alias.length) {
+    if (alias.length === 1) { setMatchedFund(alias[0]); toast('已匹配到产品'); return; }
+    renderProductCandidates(alias, '该产品对应多个货币基金，请选择确认：');
+    return;
+  }
+
+  // ② 东方财富基金联想接口
+  box.innerHTML = '<div style="font-size:.74rem;color:var(--text-3);">正在匹配…</div>';
+  try {
+    let list = await searchFundByKeyword(kw);
+    const money = list.filter(f => f.type.indexOf('货币') >= 0);
+    if (money.length) list = money;
+    if (!list.length) {
+      box.innerHTML = '<div style="font-size:.74rem;color:var(--expense);">未匹配到产品，请直接在下方填写基金代码</div>';
+      return;
+    }
+    if (list.length === 1) { setMatchedFund(list[0]); toast('已匹配到产品'); return; }
+    renderProductCandidates(list.slice(0, 8), '匹配到多个结果，请选择确认：');
+  } catch (e) {
+    box.innerHTML = '<div style="font-size:.74rem;color:var(--expense);">匹配失败（网络不可用），请直接在下方填写基金代码</div>';
+  }
 }
 
 function saveAccount() {
   const name = document.getElementById('accountName').value.trim();
   if (!name) { toast('请输入账户名称'); return; }
-  const balance = parseFloat(document.getElementById('accountBalance').value) || 0;
+  const t = ACCOUNT_TYPES.find(x => x.id === selectedAccType) || ACCOUNT_TYPES[0];
+  const entered = parseFloat(document.getElementById('accountBalance').value) || 0;
+  // 负债以「欠款金额」录入，内部统一存为负数
+  const balance = t.side === 'liability' ? -Math.abs(entered) : entered;
+  const today = fmt.dateFull(new Date());
+
+  const fields = {};
+  if (t.rateKind === 'bank_demand' || t.rateKind === 'bank_fixed') {
+    fields.bankId = document.getElementById('bankSelect').value;
+    fields.depositType = t.rateKind === 'bank_demand' ? 'current' : document.getElementById('depositTypeSelect').value;
+  } else if (t.rateKind === 'fund') {
+    const code = document.getElementById('accountFundCode').value.trim();
+    if (!code) { toast('请先匹配或填写货币基金代码'); return; }
+    fields.fundCode = code;
+    fields.fundName = (pendingFund && pendingFund.name) || '';
+  } else if (t.rateKind === 'manual') {
+    fields.interestRate = parseFloat(document.getElementById('accountInterestRate').value) || 0;
+  } else if (t.rateKind === 'estate') {
+    fields.estateKind = document.getElementById('estateKindSelect').value;
+  }
 
   if (editingAccountId) {
     const oldAcc = Store.getAccount(editingAccountId);
-    const updates = {
-      name,
-      type: selectedAccType,
-      lastInterestDate: fmt.dateFull(new Date())
-    };
-    if (selectedAccType === 'bank') {
-      updates.bankId = document.getElementById('bankSelect').value;
-      updates.depositType = document.getElementById('depositTypeSelect').value;
-    }
-    if (selectedAccType === 'other') {
-      updates.interestRate = parseFloat(document.getElementById('accountInterestRate').value) || 0;
-    }
-    if (selectedAccType === 'alipay' || selectedAccType === 'wechat') {
-      updates.fundCode = document.getElementById('accountFundCode').value.trim() || DEFAULT_FUND_CODE[selectedAccType];
-    }
-    Store.updateAccount(editingAccountId, updates);
+    Store.updateAccount(editingAccountId, { name, type: selectedAccType, lastInterestDate: today, ...fields });
 
     // 余额手动调整
     if (oldAcc && Math.abs(balance - oldAcc.balance) >= 0.005) {
       Store.setAccountBalance(editingAccountId, balance, `余额调整 · ${name}`);
     }
+    // 不动产估值历史
+    if (t.rateKind === 'estate' && oldAcc && Math.abs(balance - oldAcc.balance) >= 0.005) {
+      const hist = (oldAcc.valuationHistory || []).filter(h => h.date !== today);
+      hist.push({ date: today, value: balance });
+      Store.updateAccount(editingAccountId, { valuationHistory: hist });
+    }
     toast('账户已更新');
     editingAccountId = null;
   } else {
-    const acc = {
-      name, type: selectedAccType, balance,
-      lastInterestDate: fmt.dateFull(new Date())
-    };
-    if (selectedAccType === 'bank') {
-      acc.bankId = document.getElementById('bankSelect').value;
-      acc.depositType = document.getElementById('depositTypeSelect').value;
-    }
-    if (selectedAccType === 'other') {
-      acc.interestRate = parseFloat(document.getElementById('accountInterestRate').value) || 0;
-    }
-    if (selectedAccType === 'alipay' || selectedAccType === 'wechat') {
-      acc.fundCode = document.getElementById('accountFundCode').value.trim() || DEFAULT_FUND_CODE[selectedAccType];
-    }
+    const acc = { name, type: selectedAccType, balance, lastInterestDate: today, ...fields };
+    if (t.rateKind === 'estate') acc.valuationHistory = [{ date: today, value: balance }];
     Store.addAccount(acc);
     toast('账户已添加');
   }
@@ -2182,8 +2403,12 @@ function renderDashboard() {
 
   const income = txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const expense = txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-  const interestIncome = txns.filter(t => t.isAutoInterest).reduce((s, t) => s + t.amount, 0);
-  const totalBalance = Store.getAccounts().reduce((s, a) => s + a.balance, 0);
+  const interestIncome = txns.filter(t => t.isAutoInterest && t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const interestCost = txns.filter(t => t.isAutoInterest && t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  const accs = Store.getAccounts();
+  const assetTotal = accs.filter(a => !isLiability(a)).reduce((s, a) => s + a.balance, 0);
+  const liabilityTotal = accs.filter(a => isLiability(a)).reduce((s, a) => s - a.balance, 0);
+  const netWorth = assetTotal - liabilityTotal;
 
   const grid = document.getElementById('overviewGrid');
   grid.innerHTML = `
@@ -2193,13 +2418,14 @@ function renderDashboard() {
       <div class="icon income">📈</div>
     </div>
     <div class="overview-card">
-      <div class="label">本月支出</div>
+      <div class="label">本月支出${interestCost > 0.005 ? ` <span style="font-size:.7rem;color:var(--expense);">含资金成本 ¥${fmt.money(interestCost)}</span>` : ''}</div>
       <div class="value expense">¥${fmt.money(expense)}</div>
       <div class="icon expense">📉</div>
     </div>
     <div class="overview-card">
-      <div class="label">账户总余额</div>
-      <div class="value">¥${fmt.money(totalBalance)}</div>
+      <div class="label">净资产</div>
+      <div class="value">${netWorth < 0 ? '-' : ''}¥${fmt.money(netWorth)}</div>
+      <div style="font-size:.7rem;color:var(--text-3);margin-top:2px;">资产 ¥${fmt.money(assetTotal)} · 负债 ¥${fmt.money(liabilityTotal)}</div>
       <div class="icon balance">💼</div>
     </div>
   `;
@@ -2360,16 +2586,20 @@ function renderTxnList() {
  * ============================================================ */
 function renderAccounts() {
   const accounts = Store.getAccounts();
-  const totalBalance = accounts.reduce((s, a) => s + a.balance, 0);
+  const assetTotal = accounts.filter(a => !isLiability(a)).reduce((s, a) => s + a.balance, 0);
+  const liabilityTotal = accounts.filter(a => isLiability(a)).reduce((s, a) => s - a.balance, 0);
+  const netWorth = assetTotal - liabilityTotal;
   const totalDailyInterest = accounts.reduce((s, a) => {
+    if (isLiability(a) || a.balance <= 0) return s;
     const rateInfo = getAccountRateInfo(a);
-    if (rateInfo.rate > 0 && a.balance > 0) return s + a.balance * (rateInfo.rate / 100 / 365);
+    if (rateInfo.rate > 0) return s + a.balance * (rateInfo.rate / 100 / 365);
     return s;
   }, 0);
 
   document.getElementById('totalBalanceBanner').innerHTML = `
-    <div class="label">总余额${totalDailyInterest > 0.005 ? ` · 日利息约 ¥${fmt.money(totalDailyInterest)}` : ''}</div>
-    <div class="value">¥${fmt.money(totalBalance)}</div>
+    <div class="label">净资产${totalDailyInterest > 0.005 ? ` · 日利息约 ¥${fmt.money(totalDailyInterest)}` : ''}</div>
+    <div class="value">${netWorth < 0 ? '-' : ''}¥${fmt.money(netWorth)}</div>
+    <div style="font-size:.76rem;color:var(--text-3);margin-top:4px;">总资产 ¥${fmt.money(assetTotal)} · 总负债 ¥${fmt.money(liabilityTotal)}</div>
   `;
 
   const grid = document.getElementById('accountGrid');
@@ -2378,28 +2608,39 @@ function renderAccounts() {
     return;
   }
   grid.innerHTML = accounts.map(a => {
-    const typeInfo = ACCOUNT_TYPES.find(t => t.id === a.type) || { emoji: '📦', name: '其他' };
+    const typeInfo = accTypeOf(a);
+    const liab = typeInfo.side === 'liability';
     const rateInfo = getAccountRateInfo(a);
-    const dailyInterest = rateInfo.rate > 0 && a.balance > 0 ? a.balance * (rateInfo.rate / 100 / 365) : 0;
+    const absBal = Math.abs(a.balance);
+    const dailyInterest = !liab && rateInfo.rate > 0 && a.balance > 0 ? a.balance * (rateInfo.rate / 100 / 365) : 0;
 
     let typeDetail = typeInfo.name;
-    if (a.type === 'bank') {
+    if (a.type === 'demand' || a.type === 'fixed') {
       const bank = BANKS.find(b => b.id === a.bankId);
       const dep = DEPOSIT_TYPES.find(d => d.id === a.depositType);
       typeDetail = `${bank?.short || ''} ${dep?.name || ''}`;
+    } else if (a.type === 'money' && a.fundName) {
+      typeDetail = `${typeInfo.name} · ${a.fundName}`;
+    } else if (a.type === 'estate') {
+      const kind = (ESTATE_KINDS.find(k => k.id === a.estateKind) || {}).name || '不动产';
+      typeDetail = `${typeInfo.name} · ${kind}`;
     }
 
-    const rateHtml = rateInfo.rate > 0
-      ? `<div class="acc-rate">📊 年化 ${rateInfo.rate}%</div>`
-      : `<div class="acc-rate zero">不计息</div>`;
+    const rateHtml = a.type === 'estate'
+      ? `<div class="acc-rate zero">按成交价估值</div>`
+      : (rateInfo.rate > 0
+        ? `<div class="acc-rate">📊 ${liab ? '资金成本' : '年化'} ${rateInfo.rate}%</div>`
+        : `<div class="acc-rate zero">不计息</div>`);
     const dailyHtml = dailyInterest > 0.005
       ? `<div class="acc-daily-interest"><span class="label-sm">日利息约</span> ¥${fmt.money(dailyInterest)}</div>`
-      : '';
+      : (liab && rateInfo.rate > 0 && absBal > 0
+        ? `<div class="acc-daily-interest"><span class="label-sm">日资金成本约</span> ¥${fmt.money(absBal * (rateInfo.rate / 100 / 365))}</div>`
+        : '');
     return `
       <div class="account-card">
-        <div class="acc-name">${typeInfo.emoji} ${escapeHtml(a.name)}</div>
+        <div class="acc-name">${typeInfo.emoji} ${escapeHtml(a.name)}${liab ? ' <span style="font-size:.66rem;color:var(--expense);background:var(--expense-bg);border-radius:6px;padding:1px 6px;">负债</span>' : ''}</div>
         <div class="acc-type">${escapeHtml(typeDetail)}</div>
-        <div class="acc-balance"><span class="currency-sm">¥</span>${fmt.money(a.balance)}</div>
+        <div class="acc-balance">${liab ? '-' : ''}<span class="currency-sm">¥</span>${fmt.money(absBal)}</div>
         ${rateHtml}
         <div style="font-size:.68rem;color:var(--text-3);margin-top:4px;">来源：${rateInfo.source}</div>
         ${dailyHtml}
@@ -2878,8 +3119,8 @@ async function importData(event) {
  * ============================================================ */
 const UpdateChecker = {
   // 与 android/app/build.gradle 保持一致，由发版脚本自动同步
-  VERSION_CODE: 1,
-  VERSION_NAME: '1.0.0',
+  VERSION_CODE: 2,
+  VERSION_NAME: '1.0.1',
 
   // 更新源：优先 jsDelivr（国内可达），失败回退 GitHub 原生地址
   MANIFEST_URLS: [
@@ -3237,8 +3478,8 @@ const RateFeed = {
   async preloadForAccounts(accounts) {
     const codes = [];
     accounts.forEach(a => {
-      if (a.type !== 'alipay' && a.type !== 'wechat') return;
-      const code = a.fundCode || DEFAULT_FUND_CODE[a.type];
+      if (accTypeOf(a).rateKind !== 'fund') return;
+      const code = a.fundCode;
       if (code && codes.indexOf(code) < 0) codes.push(code);
     });
     const report = { codes, ok: [], failed: [], failover: null };
@@ -3333,7 +3574,7 @@ function checkMonthlyReconcile() {
   Store.data.settings.lastReconcileMonth = key;
   Store.save();
   if (!prev) return; // 首次使用不打扰
-  setTimeout(() => toast('新的一月开始了，请到「账户」页核对实际余额，有偏差可直接编辑修正'), 2600);
+  setTimeout(() => toast('每月1日数据更新提醒：请到「账户」页核对余额，并更新股票/保险/账户的手动利率与不动产估值'), 2600);
 }
 
 /* ============================================================

@@ -1,8 +1,8 @@
 {
-    "versionCode":  2,
-    "versionName":  "1.0.1",
-    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.1.apk",
-    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.1.apk",
-    "changelog":  "新增：余额宝/零钱通利率按公开行情每日自动刷新，支持主力+双备选容错与每日补息；每月提醒核对余额",
-    "publishedAt":  "2026-10-12"
+    "versionCode":  3,
+    "versionName":  "1.0.2",
+    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.2.apk",
+    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.2.apk",
+    "changelog":  "新增账户体系：12类资产/负债账户与净资产统计；理财产品名称模糊匹配（本地别名+东财联想）自动取数并每日刷新；负债按资金成本利率计息；不动产手动估值与估值历史；每月1日数据更新提醒",
+    "publishedAt":  "2026-10-13"
 }

@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 // 利率行情源所在的域名：为其放开跨域并补上 Referer，使渲染进程可直接 fetch
-const RATE_HOSTS = ['fund.eastmoney.com', 'api.fund.eastmoney.com', 'danjuanapp.com'];
+const RATE_HOSTS = ['fund.eastmoney.com', 'api.fund.eastmoney.com', 'danjuanapp.com', 'fundsuggest.eastmoney.com'];
 
 let mainWindow;
 
