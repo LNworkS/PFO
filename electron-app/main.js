@@ -1,6 +1,9 @@
-const { app, BrowserWindow, Menu, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+
+// 利率行情源所在的域名：为其放开跨域并补上 Referer，使渲染进程可直接 fetch
+const RATE_HOSTS = ['fund.eastmoney.com', 'api.fund.eastmoney.com', 'danjuanapp.com'];
 
 let mainWindow;
 
@@ -103,6 +106,32 @@ ipcMain.handle('data:importFile', async () => {
 });
 
 app.whenReady().then(() => {
+  const ses = session.defaultSession;
+  const isRateHost = url => RATE_HOSTS.some(h => url.indexOf(h) >= 0);
+
+  // 补 Referer（部分行情接口有来源校验）
+  ses.webRequest.onBeforeSendHeaders((details, cb) => {
+    try {
+      if (isRateHost(details.url)) {
+        details.requestHeaders['Referer'] = 'https://fundf10.eastmoney.com/';
+      }
+    } catch (e) { /* 忽略 */ }
+    cb({ requestHeaders: details.requestHeaders });
+  });
+
+  // 仅对行情源放开跨域，避免全局关闭 webSecurity
+  ses.webRequest.onHeadersReceived((details, cb) => {
+    try {
+      if (isRateHost(details.url)) {
+        const headers = details.responseHeaders || {};
+        headers['Access-Control-Allow-Origin'] = ['*'];
+        cb({ responseHeaders: headers });
+        return;
+      }
+    } catch (e) { /* 忽略 */ }
+    cb({});
+  });
+
   createWindow();
 
   app.on('activate', () => {

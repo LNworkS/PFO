@@ -766,6 +766,17 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
         <label class="form-label">存款类型</label>
         <select class="form-select" id="depositTypeSelect" onchange="updateRatePreview()"></select>
       </div>
+      <div class="form-group" id="fundCodeGroup" style="display:none;">
+        <label class="form-label">货币基金代码</label>
+        <input type="text" class="form-input" id="accountFundCode" list="fundCodePresets" placeholder="如：000198" oninput="updateRatePreview()">
+        <datalist id="fundCodePresets">
+          <option value="000198">天弘余额宝货币</option>
+          <option value="000359">易方达易理财货币A</option>
+          <option value="003003">华夏现金增利货币A</option>
+          <option value="000343">华夏财富宝货币A</option>
+        </datalist>
+        <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;">7 日年化收益率按此基金的公开行情每日自动刷新</div>
+      </div>
       <div class="form-group" id="manualRateGroup" style="display:none;">
         <label class="form-label">自定义年化利率（%）</label>
         <div class="rate-input-wrap">
@@ -883,6 +894,11 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
         <div class="info"><div class="title">分类管理</div><div class="desc">自定义收支分类，支持增删改</div></div>
         <span class="arrow">›</span>
       </div>
+      <div class="setting-item" onclick="closeModal('settingsModalOverlay'); openRateSourceModal()">
+        <div class="icon" style="background:var(--primary-bg);color:var(--primary);">📡</div>
+        <div class="info"><div class="title">利率数据源</div><div class="desc">配置货币基金利率的行情来源</div></div>
+        <span class="arrow">›</span>
+      </div>
       <div class="setting-item" onclick="closeModal('settingsModalOverlay'); UpdateChecker.check(true)">
         <div class="icon" style="background:var(--transfer-bg);color:var(--transfer);">🔄</div>
         <div class="info"><div class="title">检查更新</div><div class="desc">当前版本 v<span id="settingsVersion">-</span></div></div>
@@ -987,6 +1003,17 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
     </div>
   </div>
 
+  <!-- 利率数据源模态框 -->
+  <div class="modal-overlay" id="rateSourceModalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">利率数据源</span>
+        <button class="modal-close" onclick="closeModal('rateSourceModalOverlay')">×</button>
+      </div>
+      <div id="rateSourceBody"></div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 </div>
 
@@ -1014,7 +1041,6 @@ const Store = {
       if (!this.data.categories.income) this.data.categories.income = this.defaultData().categories.income;
     }
     this.migrateAccounts();
-    this.refreshInterest();
   },
   migrateAccounts() {
     const today = fmt.dateFull(new Date());
@@ -1029,7 +1055,18 @@ const Store = {
         a.type = 'other';
         a.interestRate = a.interestRate || 0;
       }
+      // 货币基金账户补充默认基金代码
+      if (a.type === 'alipay' || a.type === 'wechat') {
+        if (!a.fundCode) a.fundCode = DEFAULT_FUND_CODE[a.type];
+      }
     });
+  },
+  async bootstrapAfterUnlock() {
+    // 先按「主力→备选」拉取货币基金利率（仅入内存），再逐日复利计息
+    const report = await RateFeed.preloadForAccounts(this.data.accounts);
+    this.refreshInterest();
+    this._rateFeedReport = report;
+    return report;
   },
   refreshInterest() {
     const todayStr = fmt.dateFull(new Date());
@@ -1378,7 +1415,7 @@ const Auth = {
     localStorage.removeItem(OLD_KEY);
 
     this.isUnlocked = true;
-    Store.refreshInterest();
+    await Store.bootstrapAfterUnlock();
     await this._encryptAndSave();
   },
   async login(password) {
@@ -1396,6 +1433,7 @@ const Auth = {
       Store.loadData(Store.defaultData());
     }
     this.isUnlocked = true;
+    await Store.bootstrapAfterUnlock();
   },
   lock() {
     this.isUnlocked = false;
@@ -1456,7 +1494,7 @@ const Auth = {
     const decrypted = await Crypto.decrypt(data.encryptedData, key);
     Store.data = decrypted;
     Store.migrateAccounts();
-    Store.refreshInterest();
+    await Store.bootstrapAfterUnlock();
     await this._encryptAndSave();
     return true;
   },
@@ -1676,11 +1714,12 @@ function getRateForDate(acc, dateStr) {
   if (acc.type === 'cash') return 0;
   if (acc.type === 'other') return acc.interestRate || 0;
 
-  if (acc.type === 'alipay') {
-    return lookupRate(YUEBAO_RATES, dateStr);
-  }
-  if (acc.type === 'wechat') {
-    return lookupRate(LINGQIAN_RATES, dateStr);
+  if (acc.type === 'alipay' || acc.type === 'wechat') {
+    const code = acc.fundCode || DEFAULT_FUND_CODE[acc.type];
+    // 优先用实时行情；取不到时回退到内置近似表
+    const live = RateFeed.rateOn(code, dateStr);
+    if (live !== null) return live;
+    return lookupRate(acc.type === 'alipay' ? YUEBAO_RATES : LINGQIAN_RATES, dateStr);
   }
   if (acc.type === 'bank') {
     const bank = BANKS.find(b => b.id === acc.bankId);
@@ -1708,13 +1747,14 @@ function lookupRate(rateArray, dateStr) {
 function getAccountRateInfo(acc) {
   if (acc.type === 'cash') return { rate: 0, source: '现金不计息' };
   if (acc.type === 'other') return { rate: acc.interestRate || 0, source: '自定义利率' };
-  if (acc.type === 'alipay') {
-    const r = lookupRate(YUEBAO_RATES, fmt.dateFull(new Date()));
-    return { rate: r, source: '余额宝7日年化' };
-  }
-  if (acc.type === 'wechat') {
-    const r = lookupRate(LINGQIAN_RATES, fmt.dateFull(new Date()));
-    return { rate: r, source: '零钱通7日年化' };
+  if (acc.type === 'alipay' || acc.type === 'wechat') {
+    const code = acc.fundCode || DEFAULT_FUND_CODE[acc.type];
+    const today = fmt.dateFull(new Date());
+    const label = acc.type === 'alipay' ? '余额宝7日年化' : '零钱通7日年化';
+    const live = RateFeed.rateOn(code, today);
+    if (live !== null) return { rate: live, source: `${label}（${code}·实时）` };
+    const r = lookupRate(acc.type === 'alipay' ? YUEBAO_RATES : LINGQIAN_RATES, today);
+    return { rate: r, source: `${label}（${code}·内置近似）` };
   }
   if (acc.type === 'bank') {
     const bank = BANKS.find(b => b.id === acc.bankId);
@@ -1937,6 +1977,7 @@ function openAccountModal(accountId) {
   document.getElementById('accountName').value = '';
   document.getElementById('accountBalance').value = '';
   document.getElementById('accountInterestRate').value = '';
+  document.getElementById('accountFundCode').value = '';
   document.getElementById('balanceLabel').textContent = '初始余额';
   document.getElementById('balanceEditHint').style.display = 'none';
   selectedAccType = 'cash';
@@ -1955,6 +1996,7 @@ function openAccountModal(accountId) {
       document.getElementById('balanceLabel').textContent = '账户余额';
       document.getElementById('balanceEditHint').style.display = 'block';
       document.getElementById('accountInterestRate').value = acc.interestRate || '';
+      document.getElementById('accountFundCode').value = acc.fundCode || '';
       if (acc.bankId) document.getElementById('bankSelect').value = acc.bankId;
       if (acc.depositType) document.getElementById('depositTypeSelect').value = acc.depositType;
       selectedAccType = acc.type;
@@ -1984,12 +2026,20 @@ function selectAccType(id) {
 function updateAccTypeFields() {
   const bankGroup = document.getElementById('bankSelectGroup');
   const depGroup = document.getElementById('depositTypeGroup');
+  const fundGroup = document.getElementById('fundCodeGroup');
   const manualGroup = document.getElementById('manualRateGroup');
   const ratePreview = document.getElementById('ratePreviewGroup');
 
+  const isFund = (selectedAccType === 'alipay' || selectedAccType === 'wechat');
   bankGroup.style.display = (selectedAccType === 'bank') ? 'block' : 'none';
   depGroup.style.display = (selectedAccType === 'bank') ? 'block' : 'none';
   manualGroup.style.display = (selectedAccType === 'other') ? 'block' : 'none';
+  fundGroup.style.display = isFund ? 'block' : 'none';
+  // 货币基金账户填入默认基金代码
+  if (isFund) {
+    const inp = document.getElementById('accountFundCode');
+    if (!inp.value) inp.value = DEFAULT_FUND_CODE[selectedAccType];
+  }
   ratePreview.style.display = (selectedAccType === 'bank' || selectedAccType === 'alipay' || selectedAccType === 'wechat') ? 'block' : 'none';
 
   updateRatePreview();
@@ -2001,6 +2051,7 @@ function updateRatePreview() {
     type: selectedAccType,
     bankId: document.getElementById('bankSelect')?.value,
     depositType: document.getElementById('depositTypeSelect')?.value,
+    fundCode: document.getElementById('accountFundCode')?.value || undefined,
   };
   const info = getAccountRateInfo(tempAcc);
   document.getElementById('ratePreviewValue').textContent = info.rate > 0 ? info.rate + '%' : '不计息';
@@ -2026,6 +2077,9 @@ function saveAccount() {
     if (selectedAccType === 'other') {
       updates.interestRate = parseFloat(document.getElementById('accountInterestRate').value) || 0;
     }
+    if (selectedAccType === 'alipay' || selectedAccType === 'wechat') {
+      updates.fundCode = document.getElementById('accountFundCode').value.trim() || DEFAULT_FUND_CODE[selectedAccType];
+    }
     Store.updateAccount(editingAccountId, updates);
 
     // 余额手动调整
@@ -2045,6 +2099,9 @@ function saveAccount() {
     }
     if (selectedAccType === 'other') {
       acc.interestRate = parseFloat(document.getElementById('accountInterestRate').value) || 0;
+    }
+    if (selectedAccType === 'alipay' || selectedAccType === 'wechat') {
+      acc.fundCode = document.getElementById('accountFundCode').value.trim() || DEFAULT_FUND_CODE[selectedAccType];
     }
     Store.addAccount(acc);
     toast('账户已添加');
@@ -2729,6 +2786,15 @@ async function authSubmit() {
       const r = Store._interestRefreshed;
       toast(`已自动结算 ${r.count} 笔利息，合计 ¥${fmt.money(r.total)}`);
     }
+    // 利率数据源失效提示：主力失效已自动切换，引导用户补齐备选
+    const rf = Store._rateFeedReport;
+    if (rf && rf.failover) {
+      toast(`数据源「${rf.failover.failedName}」失效，已切换到「${rf.failover.promotedName}」`);
+      setTimeout(() => openRateSourceModal(true), 1100);
+    } else if (rf && rf.failed.length) {
+      toast('部分利率暂时无法获取，已使用内置近似值');
+    }
+    checkMonthlyReconcile();
     // 解锁后静默检查更新，不打断首次进入
     setTimeout(() => UpdateChecker.check(false), 1200);
   } catch(e) {
@@ -2812,8 +2878,8 @@ async function importData(event) {
  * ============================================================ */
 const UpdateChecker = {
   // 与 android/app/build.gradle 保持一致，由发版脚本自动同步
-  VERSION_CODE: 1,
-  VERSION_NAME: '1.0.0',
+  VERSION_CODE: 2,
+  VERSION_NAME: '1.0.1',
 
   // 更新源：优先 jsDelivr（国内可达），失败回退 GitHub 原生地址
   MANIFEST_URLS: [
@@ -3022,6 +3088,253 @@ document.addEventListener('visibilitychange', () => {
   UpdateChecker._awaitingPermission = false;
   setTimeout(() => UpdateChecker.startDownload(), 600);
 });
+
+/* ============================================================
+ * 实时利率数据源（货币基金 7 日年化）
+ *
+ * 说明：
+ * - 利率仅用于逐日复利计息，不写入本地数据库，只保留在内存中
+ * - 每次打开应用时按「主力 → 备选1 → 备选2」顺序拉取；主力失效自动切换并提示用户补充备选
+ * - 数据源选择属于配置，会随加密数据一起保存
+ * ============================================================ */
+const MONEY_FUND_PRESETS = [
+  { code: '000198', name: '天弘余额宝货币' },
+  { code: '000359', name: '易方达易理财货币A' },
+  { code: '003003', name: '华夏现金增利货币A' },
+  { code: '000343', name: '华夏财富宝货币A' },
+];
+// 余额宝 / 零钱通默认对应的货币基金（可在账户编辑中修改）
+const DEFAULT_FUND_CODE = { alipay: '000198', wechat: '000359' };
+
+const RateFeed = {
+  // 数据源目录：每家都能提供同一只基金的历史 7 日年化
+  CATALOG: [
+    {
+      id: 'em_pingzhong', name: '东方财富 · 基金行情', provider: '东方财富', transport: 'script',
+      build: c => `https://fund.eastmoney.com/pingzhongdata/${c}.js`,
+      parseScript: () => {
+        const arr = window.Data_sevenDaysYearIncome;
+        try { delete window.Data_sevenDaysYearIncome; } catch (e) { /* 忽略 */ }
+        if (!Array.isArray(arr) || !arr.length) throw new Error('数据格式异常');
+        return arr.map(p => ({ date: RateFeed.tsToDate(p[0]), rate: Number(p[1]) }));
+      },
+    },
+    {
+      id: 'em_lsjz', name: '天天基金 · 历史收益', provider: '天天基金', transport: 'http',
+      build: c => `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${c}&pageIndex=1&pageSize=200`,
+      headers: { 'Referer': 'https://fundf10.eastmoney.com/' },
+      parseJson: j => {
+        const list = j && j.Data && j.Data.LSJZList;
+        if (!Array.isArray(list) || !list.length) throw new Error('数据格式异常');
+        return list.map(x => ({ date: x.FSRQ, rate: Number(x.LJJZ) })).reverse();
+      },
+    },
+    {
+      id: 'danjuan', name: '蛋卷基金 · 历史收益', provider: '蛋卷基金', transport: 'http',
+      build: c => `https://danjuanapp.com/djapi/fund/nav/history/${c}?page=1&size=200`,
+      parseJson: j => {
+        const items = j && j.data && j.data.items;
+        if (!Array.isArray(items) || !items.length) throw new Error('数据格式异常');
+        return items.map(x => ({ date: x.date, rate: Number(x.value) })).reverse();
+      },
+    },
+  ],
+  DEFAULT_CONFIG: { primary: 'em_pingzhong', backups: ['em_lsjz', 'danjuan'] },
+  _cache: {},   // code -> { entries:[{date,rate}] }  仅内存
+  _queue: {},
+
+  sourceById(id) { return this.CATALOG.find(s => s.id === id) || null; },
+  getConfig() {
+    const cfg = Store.data && Store.data.settings && Store.data.settings.rateSources;
+    if (!cfg || !cfg.primary) return JSON.parse(JSON.stringify(this.DEFAULT_CONFIG));
+    return { primary: cfg.primary, backups: (cfg.backups || []).slice(0, 2) };
+  },
+  saveConfig(cfg) {
+    if (!Store.data.settings) Store.data.settings = {};
+    Store.data.settings.rateSources = cfg;
+    Store.save();
+  },
+  chain() {
+    const cfg = this.getConfig();
+    return [cfg.primary, ...cfg.backups].map(id => this.sourceById(id)).filter(Boolean);
+  },
+  tsToDate(ms) {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  },
+
+  // 拉取某只基金的完整历史，按 主力→备选 顺序尝试
+  async fetchSeries(code) {
+    if (this._cache[code]) return this._cache[code];
+    if (this._queue[code]) return this._queue[code];
+    this._queue[code] = (async () => {
+      const list = this.chain();
+      let lastErr = null;
+      for (let i = 0; i < list.length; i++) {
+        try {
+          const series = await this.loadFrom(list[i], code);
+          const entries = series.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+          const result = { code, sourceId: list[i].id, rank: i, entries };
+          this._cache[code] = result;
+          return result;
+        } catch (e) { lastErr = e; }
+      }
+      throw lastErr || new Error('所有数据源均不可用');
+    })();
+    try { return await this._queue[code]; } finally { delete this._queue[code]; }
+  },
+  loadFrom(src, code) {
+    const url = src.build(code);
+    if (src.transport === 'script') return this.loadScript(src, url);
+    return this.loadHttp(src, url);
+  },
+  loadScript(src, url) {
+    return new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = url; el.async = true;
+      let finished = false;
+      const timer = setTimeout(() => { cleanup(); reject(new Error('请求超时')); }, 12000);
+      function cleanup() { clearTimeout(timer); finished = true; if (el.parentNode) el.parentNode.removeChild(el); }
+      // 移除 script 标签后浏览器会回收其设置的全局变量，但需在读取之后
+      el.onload = () => {
+        if (finished) return;
+        try { const d = src.parseScript(); cleanup(); resolve(d); }
+        catch (e) { cleanup(); reject(e); }
+      };
+      el.onerror = () => { if (finished) return; cleanup(); reject(new Error('加载失败')); };
+      document.head.appendChild(el);
+    });
+  },
+  async loadHttp(src, url) {
+    const opt = { cache: 'no-store' };
+    if (src.headers) opt.headers = src.headers;
+    const res = await fetch(url, opt);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return src.parseJson(await res.json());
+  },
+
+  // 查询某天适用的利率（同步，读内存缓存；没有则返回 null 由调用方回退到内置表）
+  rateOn(code, dateStr) {
+    const c = this._cache[code];
+    if (!c || !c.entries.length) return null;
+    const e = c.entries;
+    if (dateStr < e[0].date) return null;
+    let lo = 0, hi = e.length - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (e[mid].date <= dateStr) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return ans >= 0 ? e[ans].rate : null;
+  },
+  has(code) { return !!this._cache[code]; },
+  sourceNameOf(code) {
+    const c = this._cache[code];
+    const s = c && this.sourceById(c.sourceId);
+    return s ? s.name : '';
+  },
+
+  // 解锁后对所有货币基金账户需要的基金代码做预取
+  async preloadForAccounts(accounts) {
+    const codes = [];
+    accounts.forEach(a => {
+      if (a.type !== 'alipay' && a.type !== 'wechat') return;
+      const code = a.fundCode || DEFAULT_FUND_CODE[a.type];
+      if (code && codes.indexOf(code) < 0) codes.push(code);
+    });
+    const report = { codes, ok: [], failed: [], failover: null };
+    for (const code of codes) {
+      try {
+        const r = await this.fetchSeries(code);
+        report.ok.push(code);
+        if (r.rank > 0 && !report.failover) report.failover = this.applyFailover(r.sourceId);
+      } catch (e) { report.failed.push({ code, error: e.message }); }
+    }
+    return report;
+  },
+  // 主力失效：把生效的备选提升为主力，并把失效项移出
+  applyFailover(usedId) {
+    const cfg = this.getConfig();
+    const failed = cfg.primary;
+    if (usedId === failed) return null;
+    const rest = [cfg.primary, ...cfg.backups].filter(id => id !== failed && id !== usedId);
+    const newCfg = { primary: usedId, backups: rest.slice(0, 2) };
+    this.saveConfig(newCfg);
+    return {
+      failedId: failed, failedName: (this.sourceById(failed) || {}).name || failed,
+      promotedId: usedId, promotedName: (this.sourceById(usedId) || {}).name || usedId,
+      needRefill: newCfg.backups.length < 2,
+    };
+  },
+  reset() { this._cache = {}; this._queue = {}; },
+};
+
+/* ---------- 利率数据源管理 UI ---------- */
+function openRateSourceModal(forceRefill) {
+  renderRateSourceModal(forceRefill);
+  openModal('rateSourceModalOverlay');
+}
+
+function renderRateSourceModal(forceRefill) {
+  const cfg = RateFeed.getConfig();
+  const opts = sel => RateFeed.CATALOG.map(s =>
+    `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${escapeHtml(s.name)}（${escapeHtml(s.provider)}）</option>`).join('');
+  const slot = (label, key, sel) => `
+    <div class="form-group">
+      <label class="form-label">${label}</label>
+      <select class="form-select" data-slot="${key}">${opts(sel)}</select>
+    </div>`;
+  const status = RateFeed.CATALOG.map(s => {
+    const used = Object.keys(RateFeed._cache).some(c => RateFeed._cache[c].sourceId === s.id);
+    return `<div style="font-size:.74rem;color:var(--text-3);margin-top:4px;">· ${escapeHtml(s.name)}${used ? ' <span style="color:var(--income);">（本次已使用）</span>' : ''}</div>`;
+  }).join('');
+  document.getElementById('rateSourceBody').innerHTML = `
+    <div style="font-size:.78rem;color:var(--text-2);line-height:1.7;margin-bottom:12px;">
+      利率数据仅用于逐日复利计息，<b>不会写入本地数据库</b>。每次打开应用按「主力 → 备选1 → 备选2」顺序拉取，主力失效时自动切换到备选。
+    </div>
+    ${forceRefill ? `<div style="background:var(--expense-bg);color:var(--expense);border-radius:var(--radius-sm);padding:10px 14px;font-size:.78rem;line-height:1.6;margin-bottom:12px;">主力数据源失效，已自动切换。请重新补齐一个备选，恢复「1 主力 + 2 备选」。</div>` : ''}
+    ${slot('主力数据源', 'primary', cfg.primary)}
+    ${slot('备选数据源 1', 'b0', cfg.backups[0] || '')}
+    ${slot('备选数据源 2', 'b1', cfg.backups[1] || '')}
+    <div style="margin:14px 0 4px;font-size:.76rem;color:var(--text-2);">数据源可用性</div>
+    ${status}
+    <div class="btn-row" style="margin-top:16px;">
+      <button class="btn btn-secondary" style="flex:1;" onclick="resyncRates()">重新同步</button>
+      <button class="btn btn-primary" style="flex:2;" onclick="saveRateSourceSelection()">保存</button>
+    </div>
+  `;
+}
+
+function saveRateSourceSelection() {
+  const vals = [...document.querySelectorAll('#rateSourceBody select[data-slot]')].map(s => s.value);
+  if (new Set(vals).size !== vals.length) { toast('主力与备选不能重复'); return; }
+  RateFeed.saveConfig({ primary: vals[0], backups: [vals[1], vals[2]].filter(Boolean) });
+  resyncRates();
+}
+
+async function resyncRates() {
+  RateFeed.reset();
+  toast('正在重新同步利率…');
+  const report = await RateFeed.preloadForAccounts(Store.data.accounts);
+  Store.refreshInterest();
+  Store._rateFeedReport = report;
+  renderRateSourceModal(false);
+  refreshCurrentPage();
+  if (!report.ok.length && report.failed.length) toast('同步失败，请更换数据源');
+  else toast('利率同步完成');
+}
+
+// 每月首次打开时提醒核对实际余额（利率为近似值，可能存在偏差）
+function checkMonthlyReconcile() {
+  if (!Store.data || !Store.data.settings) return;
+  const now = new Date();
+  const key = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const prev = Store.data.settings.lastReconcileMonth;
+  if (prev === key) return;
+  Store.data.settings.lastReconcileMonth = key;
+  Store.save();
+  if (!prev) return; // 首次使用不打扰
+  setTimeout(() => toast('新的一月开始了，请到「账户」页核对实际余额，有偏差可直接编辑修正'), 2600);
+}
 
 /* ============================================================
  * 初始化
