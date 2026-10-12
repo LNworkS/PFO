@@ -1,8 +1,8 @@
 {
-    "versionCode":  3,
-    "versionName":  "1.0.2",
-    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.2.apk",
-    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.2.apk",
-    "changelog":  "新增账户体系：12类资产/负债账户与净资产统计；理财产品名称模糊匹配（本地别名+东财联想）自动取数并每日刷新；负债按资金成本利率计息；不动产手动估值与估值历史；每月1日数据更新提醒",
+    "versionCode":  4,
+    "versionName":  "1.0.3",
+    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.3.apk",
+    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.3.apk",
+    "changelog":  "新增定期存款购入日期与到期提醒（提前一月、一周、一天、当天各提醒一次）；支持招行享定存等特殊定存产品手动输入利率，定存利率购入时锁定不再每日浮动，仅在新增与到期续存时更新；账户页新增一键续存（自动带出今日为购入日）；修复 Electron 端 index.html 未随发版同步的问题",
     "publishedAt":  "2026-10-13"
 }

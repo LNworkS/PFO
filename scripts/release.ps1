@@ -67,7 +67,8 @@ $html = $html -replace "(VERSION_CODE:\s*)\d+", "`${1}$newCode"
 $html = $html -replace "(VERSION_NAME:\s*')[^']*'", "`${1}$Version'"
 Write-Utf8NoBom $rootHtml $html
 Copy-Item $rootHtml $wwwHtml -Force
-Write-Host "已同步 index.html 与 mobile-app/www/index.html"
+Copy-Item $rootHtml (Join-Path $root 'electron-app\index.html') -Force
+Write-Host "已同步 index.html、mobile-app/www/index.html、electron-app/index.html"
 
 # ---------- 3. 构建签名 APK ----------
 Step '同步网页代码并构建签名 APK'

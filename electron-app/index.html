@@ -764,7 +764,20 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
       </div>
       <div class="form-group" id="depositTypeGroup" style="display:none;">
         <label class="form-label">存款类型</label>
-        <select class="form-select" id="depositTypeSelect" onchange="updateRatePreview()"></select>
+        <select class="form-select" id="depositTypeSelect" onchange="updateAccTypeFields()"></select>
+      </div>
+      <div class="form-group" id="purchaseDateGroup" style="display:none;">
+        <label class="form-label">购入日期</label>
+        <input type="date" class="form-input" id="accountPurchaseDate" onchange="updateAccTypeFields()">
+        <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;" id="maturityHint"></div>
+      </div>
+      <div class="form-group" id="fixedRateGroup" style="display:none;">
+        <label class="form-label">利率方式</label>
+        <select class="form-select" id="fixedRateModeSelect" onchange="updateAccTypeFields()">
+          <option value="policy">按银行挂牌利率（购入时锁定）</option>
+          <option value="manual">自定义利率（特殊产品，如享定存）</option>
+        </select>
+        <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;">定存利率不浮动，仅在购入和到期续存时更新；特殊产品（如招行享定存）无公开数据源可查询，请选择「自定义利率」并按银行 App 显示的利率填写。</div>
       </div>
       <div class="form-group" id="fundCodeGroup" style="display:none;">
         <label class="form-label">理财产品名称</label>
@@ -1083,6 +1096,16 @@ const Store = {
         if (!a.depositType) a.depositType = a.type === 'demand' ? 'current' : 'fixed_1y';
         if (a.type === 'demand') a.depositType = 'current';
       }
+      // 定期存款补充购入日期、到期日与锁定利率
+      if (a.type === 'fixed') {
+        if (!a.purchaseDate) a.purchaseDate = a.lastInterestDate || today;
+        if (!a.maturityDate) a.maturityDate = addTermToDate(a.purchaseDate, a.depositType);
+        if (!a.rateMode) a.rateMode = 'policy';
+        if (a.interestRate === undefined || a.interestRate === null) {
+          a.interestRate = computeLockedRate(a.bankId, a.depositType, a.purchaseDate);
+        }
+        if (!a.maturityNotified) a.maturityNotified = {};
+      }
       // 货币理财补充默认基金代码
       if (a.type === 'money') {
         if (!a.fundCode) a.fundCode = DEFAULT_FUND_CODE[a.type] || '000198';
@@ -1102,6 +1125,7 @@ const Store = {
     const report = await RateFeed.preloadForAccounts(this.data.accounts);
     this.refreshInterest();
     this._rateFeedReport = report;
+    checkMaturityReminders();
     return report;
   },
   refreshInterest() {
@@ -1677,6 +1701,52 @@ const DEPOSIT_TYPES = [
 // 定期存款可选期限（不含活期）
 const FIXED_DEPOSIT_TYPES = DEPOSIT_TYPES.filter(d => d.id !== 'current');
 
+// 定存期限对应时长，用于由购入日计算到期日
+const DEPOSIT_TERMS = {
+  fixed_3m: { months: 3 }, fixed_6m: { months: 6 }, fixed_1y: { months: 12 },
+  fixed_2y: { months: 24 }, fixed_3y: { months: 36 }, fixed_5y: { months: 60 },
+  notice_1d: { days: 1 }, notice_7d: { days: 7 },
+};
+
+// 定存到期提醒节点（按提前天数，数组按由远及近排列）
+const MATURITY_MILESTONES = [
+  { key: '1m', days: 30, label: '提前一个月' },
+  { key: '1w', days: 7, label: '提前一周' },
+  { key: '1d', days: 1, label: '提前一天' },
+  { key: '0d', days: 0, label: '当天' },
+];
+
+// 由购入日与期限推算到期日（按月进位时若目标月无该日则取该月最后一天）
+function addTermToDate(dateStr, depositType) {
+  const term = DEPOSIT_TERMS[depositType];
+  if (!dateStr || !term) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  if (term.months) {
+    const day = d.getDate();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + term.months);
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(day, lastDay));
+  }
+  if (term.days) d.setDate(d.getDate() + term.days);
+  return fmt.dateFull(d);
+}
+
+function daysBetween(fromStr, toStr) {
+  if (!fromStr || !toStr) return null;
+  return Math.round((new Date(toStr + 'T00:00:00') - new Date(fromStr + 'T00:00:00')) / 86400000);
+}
+
+// 按指定日期取该行该期限的挂牌利率（定存利率不浮动，购入时锁定）
+function computeLockedRate(bankId, depositType, asOfDate) {
+  const bank = BANKS.find(b => b.id === bankId);
+  if (!bank) return 0;
+  const table = RATE_TABLES[bank.group] || RATE_TABLES.big5;
+  const rates = table[depositType];
+  if (!rates) return 0;
+  return lookupRate(rates, asOfDate);
+}
+
 // 不动产子类型
 const ESTATE_KINDS = [
   { id: 'house', name: '房产' },
@@ -1810,14 +1880,14 @@ function getRateForDate(acc, dateStr) {
       if (live !== null) return live;
       return lookupRate(fallbackFundTable(acc.fundCode), dateStr);
     }
-    case 'bank_demand':
-    case 'bank_fixed': {
+    case 'bank_fixed':
+      // 定存利率购入时锁定，不随挂牌利率浮动
+      return acc.interestRate || 0;
+    case 'bank_demand': {
       const bank = BANKS.find(b => b.id === acc.bankId);
       if (!bank) return 0;
-      const dep = t.rateKind === 'bank_demand' ? 'current' : acc.depositType;
-      if (!dep) return 0;
       const table = RATE_TABLES[bank.group] || RATE_TABLES.big5;
-      const rates = table[dep];
+      const rates = table['current'];
       if (!rates) return 0;
       return lookupRate(rates, dateStr);
     }
@@ -1866,11 +1936,16 @@ function getAccountRateInfo(acc) {
       if (r > 0) return { rate: r, source: `货币基金7日年化（${code}${name}·内置近似）` };
       return { rate: 0, source: `货币基金7日年化（${code}${name}·行情待刷新）` };
     }
-    case 'bank_demand':
     case 'bank_fixed': {
       const bank = BANKS.find(b => b.id === acc.bankId);
-      const depId = t.rateKind === 'bank_demand' ? 'current' : acc.depositType;
-      const dep = DEPOSIT_TYPES.find(d => d.id === depId);
+      const dep = DEPOSIT_TYPES.find(d => d.id === acc.depositType);
+      const mode = acc.rateMode === 'manual' ? '自定义利率' : '挂牌利率锁定';
+      const mat = acc.maturityDate ? `，${acc.maturityDate} 到期` : '';
+      return { rate: acc.interestRate || 0, source: `${bank?.short || ''}${dep?.name || ''}${mode}${mat}` };
+    }
+    case 'bank_demand': {
+      const bank = BANKS.find(b => b.id === acc.bankId);
+      const dep = DEPOSIT_TYPES.find(d => d.id === 'current');
       const r = getRateForDate(acc, today);
       return { rate: r, source: `${bank?.short || ''}${dep?.name || ''}挂牌利率` };
     }
@@ -2124,6 +2199,9 @@ function openAccountModal(accountId) {
   document.getElementById('productMatchResults').innerHTML = '';
   document.getElementById('matchedFundHint').textContent = '7 日年化收益率按此基金的公开行情每日自动刷新';
   document.getElementById('estateKindSelect').value = 'house';
+  document.getElementById('accountPurchaseDate').value = '';
+  document.getElementById('fixedRateModeSelect').value = 'policy';
+  document.getElementById('maturityHint').textContent = '';
   document.getElementById('balanceLabel').textContent = '初始余额';
   document.getElementById('balanceEditHint').style.display = 'none';
   selectedAccType = 'cash';
@@ -2147,6 +2225,10 @@ function openAccountModal(accountId) {
       if (acc.bankId) document.getElementById('bankSelect').value = acc.bankId;
       if (acc.depositType && acc.depositType !== 'current') document.getElementById('depositTypeSelect').value = acc.depositType;
       if (acc.estateKind) document.getElementById('estateKindSelect').value = acc.estateKind;
+      if (acc.type === 'fixed') {
+        document.getElementById('accountPurchaseDate').value = acc.purchaseDate || fmt.dateFull(new Date());
+        document.getElementById('fixedRateModeSelect').value = acc.rateMode || 'policy';
+      }
       selectedAccType = acc.type;
     }
   }
@@ -2177,15 +2259,30 @@ function selectAccType(id) {
 function updateAccTypeFields() {
   const t = ACCOUNT_TYPES.find(x => x.id === selectedAccType) || ACCOUNT_TYPES[0];
   const isLiab = t.side === 'liability';
+  const isDemand = t.rateKind === 'bank_demand';
+  const isFixed = t.rateKind === 'bank_fixed';
+  const fixedManual = isFixed && document.getElementById('fixedRateModeSelect').value === 'manual';
 
-  document.getElementById('bankSelectGroup').style.display = (t.rateKind === 'bank_demand' || t.rateKind === 'bank_fixed') ? 'block' : 'none';
-  document.getElementById('depositTypeGroup').style.display = (t.rateKind === 'bank_fixed') ? 'block' : 'none';
-  document.getElementById('manualRateGroup').style.display = (t.rateKind === 'manual') ? 'block' : 'none';
+  // 新定存账户默认购入日期为今天
+  if (isFixed && !document.getElementById('accountPurchaseDate').value) {
+    document.getElementById('accountPurchaseDate').value = fmt.dateFull(new Date());
+  }
+
+  document.getElementById('bankSelectGroup').style.display = (isDemand || isFixed) ? 'block' : 'none';
+  document.getElementById('depositTypeGroup').style.display = isFixed ? 'block' : 'none';
+  document.getElementById('purchaseDateGroup').style.display = isFixed ? 'block' : 'none';
+  document.getElementById('fixedRateGroup').style.display = isFixed ? 'block' : 'none';
+  document.getElementById('manualRateGroup').style.display = (t.rateKind === 'manual' || fixedManual) ? 'block' : 'none';
   document.getElementById('fundCodeGroup').style.display = (t.rateKind === 'fund') ? 'block' : 'none';
   document.getElementById('estateGroup').style.display = (t.rateKind === 'estate') ? 'block' : 'none';
 
-  document.getElementById('manualRateLabel').textContent = isLiab ? '资金成本年化利率（%）' : '自定义年化利率（%）';
-  document.getElementById('manualRateHint').textContent = isLiab ? '按此利率逐日计息，计入负债（欠款增加）' : '按此利率逐日计息，计入理财收益';
+  if (t.rateKind === 'manual') {
+    document.getElementById('manualRateLabel').textContent = isLiab ? '资金成本年化利率（%）' : '自定义年化利率（%）';
+    document.getElementById('manualRateHint').textContent = isLiab ? '按此利率逐日计息，计入负债（欠款增加）' : '按此利率逐日计息，计入理财收益';
+  } else if (fixedManual) {
+    document.getElementById('manualRateLabel').textContent = '定存年化利率（%）';
+    document.getElementById('manualRateHint').textContent = '定存利率固定不变，仅在购入与到期续存时更新';
+  }
 
   const balLabel = document.getElementById('balanceLabel');
   if (editingAccountId) {
@@ -2194,7 +2291,22 @@ function updateAccTypeFields() {
     balLabel.textContent = isLiab ? '欠款金额' : (t.rateKind === 'estate' ? '当前估值' : '初始余额');
   }
 
-  document.getElementById('ratePreviewGroup').style.display = (t.rateKind === 'none' || t.rateKind === 'estate') ? 'none' : 'block';
+  // 定存到期日提示
+  if (isFixed) {
+    const purchase = document.getElementById('accountPurchaseDate').value;
+    const term = document.getElementById('depositTypeSelect').value;
+    const mat = addTermToDate(purchase, term);
+    const hint = document.getElementById('maturityHint');
+    if (mat) {
+      const dl = daysBetween(fmt.dateFull(new Date()), mat);
+      hint.textContent = `到期日：${mat}${dl !== null && dl >= 0 ? `（还有 ${dl} 天）` : ''}；到期前一个月、一周、一天及当天会提醒`;
+    } else {
+      hint.textContent = '请选择购入日期以计算到期日';
+    }
+  }
+
+  document.getElementById('ratePreviewGroup').style.display =
+    (t.rateKind === 'none' || t.rateKind === 'estate' || fixedManual) ? 'none' : 'block';
   updateRatePreview();
 }
 
@@ -2202,6 +2314,19 @@ function updateRatePreview() {
   const grp = document.getElementById('ratePreviewGroup');
   if (!grp || grp.style.display === 'none') return;
   const t = ACCOUNT_TYPES.find(x => x.id === selectedAccType) || ACCOUNT_TYPES[0];
+
+  // 定存：展示按购入日锁定的挂牌利率
+  if (t.rateKind === 'bank_fixed') {
+    const purchase = document.getElementById('accountPurchaseDate')?.value || fmt.dateFull(new Date());
+    const dep = document.getElementById('depositTypeSelect')?.value;
+    const depName = (DEPOSIT_TYPES.find(d => d.id === dep) || {}).name || '';
+    const r = computeLockedRate(document.getElementById('bankSelect')?.value, dep, purchase);
+    document.getElementById('ratePreviewLabel').textContent = '购入锁定利率';
+    document.getElementById('ratePreviewValue').textContent = r > 0 ? r + '%' : '待确认';
+    document.getElementById('ratePreviewSource').textContent = `来源：${depName}挂牌利率（${purchase} 锁定，不再浮动）`;
+    return;
+  }
+
   const tempAcc = {
     type: selectedAccType,
     bankId: document.getElementById('bankSelect')?.value,
@@ -2291,9 +2416,20 @@ function saveAccount() {
   const today = fmt.dateFull(new Date());
 
   const fields = {};
-  if (t.rateKind === 'bank_demand' || t.rateKind === 'bank_fixed') {
+  if (t.rateKind === 'bank_demand') {
     fields.bankId = document.getElementById('bankSelect').value;
-    fields.depositType = t.rateKind === 'bank_demand' ? 'current' : document.getElementById('depositTypeSelect').value;
+    fields.depositType = 'current';
+  } else if (t.rateKind === 'bank_fixed') {
+    fields.bankId = document.getElementById('bankSelect').value;
+    fields.depositType = document.getElementById('depositTypeSelect').value;
+    const purchase = document.getElementById('accountPurchaseDate').value || today;
+    fields.purchaseDate = purchase;
+    fields.maturityDate = addTermToDate(purchase, fields.depositType);
+    fields.rateMode = document.getElementById('fixedRateModeSelect').value;
+    // 定存利率购入时锁定，不浮动
+    fields.interestRate = fields.rateMode === 'manual'
+      ? (parseFloat(document.getElementById('accountInterestRate').value) || 0)
+      : computeLockedRate(fields.bankId, fields.depositType, purchase);
   } else if (t.rateKind === 'fund') {
     const code = document.getElementById('accountFundCode').value.trim();
     if (!code) { toast('请先匹配或填写货币基金代码'); return; }
@@ -2307,6 +2443,11 @@ function saveAccount() {
 
   if (editingAccountId) {
     const oldAcc = Store.getAccount(editingAccountId);
+    // 定存续存（购入日或期限变化）时重置到期提醒
+    if (t.rateKind === 'bank_fixed' && oldAcc &&
+        (oldAcc.purchaseDate !== fields.purchaseDate || oldAcc.depositType !== fields.depositType)) {
+      fields.maturityNotified = {};
+    }
     Store.updateAccount(editingAccountId, { name, type: selectedAccType, lastInterestDate: today, ...fields });
 
     // 余额手动调整
@@ -2324,6 +2465,7 @@ function saveAccount() {
   } else {
     const acc = { name, type: selectedAccType, balance, lastInterestDate: today, ...fields };
     if (t.rateKind === 'estate') acc.valuationHistory = [{ date: today, value: balance }];
+    if (t.rateKind === 'bank_fixed') acc.maturityNotified = {};
     Store.addAccount(acc);
     toast('账户已添加');
   }
@@ -2586,6 +2728,7 @@ function renderTxnList() {
  * ============================================================ */
 function renderAccounts() {
   const accounts = Store.getAccounts();
+  const todayStr = fmt.dateFull(new Date());
   const assetTotal = accounts.filter(a => !isLiability(a)).reduce((s, a) => s + a.balance, 0);
   const liabilityTotal = accounts.filter(a => isLiability(a)).reduce((s, a) => s - a.balance, 0);
   const netWorth = assetTotal - liabilityTotal;
@@ -2636,16 +2779,30 @@ function renderAccounts() {
       : (liab && rateInfo.rate > 0 && absBal > 0
         ? `<div class="acc-daily-interest"><span class="label-sm">日资金成本约</span> ¥${fmt.money(absBal * (rateInfo.rate / 100 / 365))}</div>`
         : '');
+
+    // 定存到期信息
+    let maturityHtml = '';
+    if (a.type === 'fixed' && a.maturityDate) {
+      const dl = daysBetween(todayStr, a.maturityDate);
+      const txt = dl > 0 ? `还有 ${dl} 天到期` : (dl === 0 ? '今日到期' : `已于 ${-dl} 天前到期`);
+      const color = (dl !== null && dl <= 7) ? 'var(--expense)' : 'var(--text-3)';
+      maturityHtml = `<div style="font-size:.72rem;color:${color};margin-top:4px;">📅 ${a.maturityDate} 到期 · ${txt}</div>`;
+    }
+    const renewBtn = a.type === 'fixed'
+      ? `<button onclick="renewFixedDeposit('${a.id}')">续存</button>` : '';
+
     return `
       <div class="account-card">
         <div class="acc-name">${typeInfo.emoji} ${escapeHtml(a.name)}${liab ? ' <span style="font-size:.66rem;color:var(--expense);background:var(--expense-bg);border-radius:6px;padding:1px 6px;">负债</span>' : ''}</div>
         <div class="acc-type">${escapeHtml(typeDetail)}</div>
         <div class="acc-balance">${liab ? '-' : ''}<span class="currency-sm">¥</span>${fmt.money(absBal)}</div>
         ${rateHtml}
+        ${maturityHtml}
         <div style="font-size:.68rem;color:var(--text-3);margin-top:4px;">来源：${rateInfo.source}</div>
         ${dailyHtml}
         <div class="acc-actions">
           <button onclick="openAccountModal('${a.id}')">编辑</button>
+          ${renewBtn}
           <button onclick="deleteAccountConfirm('${a.id}')">删除</button>
         </div>
       </div>
@@ -2662,6 +2819,19 @@ function deleteAccountConfirm(id) {
   }
   toast('账户已删除');
   renderAccounts();
+}
+
+// 定存到期续存：以今天为新的购入日，保存时按新购入日重算到期日与锁定利率
+function renewFixedDeposit(id) {
+  const acc = Store.getAccount(id);
+  if (!acc) return;
+  openAccountModal(id);
+  const inp = document.getElementById('accountPurchaseDate');
+  if (inp) {
+    inp.value = fmt.dateFull(new Date());
+    updateAccTypeFields();
+  }
+  toast('已带入今天为购入日，确认期限后保存即完成续存');
 }
 
 /* ============================================================
@@ -3119,8 +3289,8 @@ async function importData(event) {
  * ============================================================ */
 const UpdateChecker = {
   // 与 android/app/build.gradle 保持一致，由发版脚本自动同步
-  VERSION_CODE: 2,
-  VERSION_NAME: '1.0.1',
+  VERSION_CODE: 4,
+  VERSION_NAME: '1.0.3',
 
   // 更新源：优先 jsDelivr（国内可达），失败回退 GitHub 原生地址
   MANIFEST_URLS: [
@@ -3575,6 +3745,29 @@ function checkMonthlyReconcile() {
   Store.save();
   if (!prev) return; // 首次使用不打扰
   setTimeout(() => toast('每月1日数据更新提醒：请到「账户」页核对余额，并更新股票/保险/账户的手动利率与不动产估值'), 2600);
+}
+
+// 定存到期提醒：提前一个月、一周、一天及当天各提醒一次（每期仅提醒一次）
+function checkMaturityReminders() {
+  if (!Store.data || !Store.data.accounts) return;
+  const todayStr = fmt.dateFull(new Date());
+  const msgs = [];
+  let dirty = false;
+  Store.data.accounts.forEach(a => {
+    if (a.type !== 'fixed' || !a.maturityDate) return;
+    const dl = daysBetween(todayStr, a.maturityDate);
+    if (dl === null || dl < 0) return; // 已到期不再重复提醒
+    a.maturityNotified = a.maturityNotified || {};
+    // 列出所有已到点但尚未提醒的节点，取最近的一个播报，其余一并标记避免补发堆积
+    const applicable = MATURITY_MILESTONES.filter(m => dl <= m.days && !a.maturityNotified[m.key]);
+    if (!applicable.length) return;
+    applicable.forEach(m => { a.maturityNotified[m.key] = true; });
+    dirty = true;
+    const when = dl === 0 ? '今日到期' : `还有 ${dl} 天到期`;
+    msgs.push(`定期存款「${a.name}」将于 ${a.maturityDate} 到期（${when}），可在「账户」页点「续存」按新利率续存`);
+  });
+  if (dirty) Store.save();
+  msgs.slice(0, 3).forEach((m, i) => setTimeout(() => toast(m), 3200 + i * 3600));
 }
 
 /* ============================================================
