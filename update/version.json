@@ -1,8 +1,8 @@
 {
-    "versionCode":  4,
-    "versionName":  "1.0.3",
-    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.3.apk",
-    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.3.apk",
-    "changelog":  "新增定期存款购入日期与到期提醒（提前一月、一周、一天、当天各提醒一次）；支持招行享定存等特殊定存产品手动输入利率，定存利率购入时锁定不再每日浮动，仅在新增与到期续存时更新；账户页新增一键续存（自动带出今日为购入日）；修复 Electron 端 index.html 未随发版同步的问题",
-    "publishedAt":  "2026-10-13"
+    "versionCode":  5,
+    "versionName":  "1.0.4",
+    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.4.apk",
+    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.4.apk",
+    "changelog":  "资产类「账户」更名为「基金」；基金、股票两类账户新增自动盈亏：绑定基金代码或股票代码后，按当日单位净值/前复权收盘价的涨跌幅逐日复算市值并自动生成当日盈亏流水（非交易日与停牌日不产生盈亏）；支持基金名称、股票名称与代码的联想匹配；未绑定标的时可填手动年化利率计息；Electron 端放开行情域名以支持桌面端取数",
+    "publishedAt":  "2026-10-14"
 }
