@@ -1,8 +1,8 @@
 {
-    "versionCode":  5,
-    "versionName":  "1.0.4",
-    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.4.apk",
-    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.4.apk",
-    "changelog":  "资产类「账户」更名为「基金」；基金、股票两类账户新增自动盈亏：绑定基金代码或股票代码后，按当日单位净值/前复权收盘价的涨跌幅逐日复算市值并自动生成当日盈亏流水（非交易日与停牌日不产生盈亏）；支持基金名称、股票名称与代码的联想匹配；未绑定标的时可填手动年化利率计息；Electron 端放开行情域名以支持桌面端取数",
+    "versionCode":  6,
+    "versionName":  "1.0.5",
+    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.5.apk",
+    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.5.apk",
+    "changelog":  "定期存款支持后期补录：新增定存时利息自「购入日」起算，按实际持有天数计息，而非从录入日起算；编辑定存并将购入日改早时，自动补齐「新购入日→原购入日」区间利息并记入流水；升级后对旧定存账户执行一次性利息追溯，按购入日追平历史利息",
     "publishedAt":  "2026-10-14"
 }

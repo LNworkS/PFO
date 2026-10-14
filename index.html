@@ -1119,6 +1119,50 @@ const Store = {
         }
         if (!a.maturityNotified) a.maturityNotified = {};
       }
+
+      // 一次性追溯：定存旧账户的利息按「购入日」追平（仅升级后首次加载执行一次）
+      if (a.type === 'fixed' && !a.interestBackfillDone) {
+        const pd = a.purchaseDate;
+        const cursor = a.lastInterestDate || today;
+        if (pd && pd < cursor) {
+          // 已计息起点 = 该账户最早一条自动计息流水所覆盖区间的起始日
+          const autoTxns = this.data.transactions
+            .filter(t => t.accountId === a.id && t.isAutoInterest)
+            .sort((x, y) => (x.date < y.date ? -1 : 1));
+          let accruedStart = null;
+          if (autoTxns.length) {
+            const m = /(\d+)天）\s*$/.exec(autoTxns[0].note || '');
+            if (m) {
+              const d0 = new Date(autoTxns[0].date + 'T00:00:00');
+              d0.setDate(d0.getDate() - parseInt(m[1], 10));
+              accruedStart = fmt.dateFull(d0);
+            }
+          }
+          if (!autoTxns.length) {
+            // 尚无计息流水：直接把计息游标移到购入日，下次刷新即从购入日补齐
+            a.lastInterestDate = pd;
+          } else if (accruedStart && pd < accruedStart) {
+            // 存在缺口 [购入日, 已计息起点)：补计该区间利息并入账
+            const gapDays = daysBetween(pd, accruedStart);
+            const gapInterest = Math.round(Math.abs(a.balance) * (a.interestRate || 0) / 100 / 365 * gapDays * 100) / 100;
+            if (gapInterest > 0.005) {
+              a.balance = Math.round((a.balance + gapInterest) * 100) / 100;
+              this.data.transactions.unshift({
+                id: 'txn_bf_' + a.id,
+                type: 'income',
+                amount: gapInterest,
+                category: 'invest',
+                accountId: a.id,
+                date: today,
+                note: `定存补录计息 · ${a.name}（${gapDays}天）`,
+                isBalanceAdjust: true,
+                createdAt: new Date().toISOString()
+              });
+            }
+          }
+        }
+        a.interestBackfillDone = true;
+      }
       // 货币理财补充默认基金代码
       if (a.type === 'money') {
         if (!a.fundCode) a.fundCode = DEFAULT_FUND_CODE[a.type] || '000198';
@@ -2407,7 +2451,7 @@ function updateAccTypeFields() {
     const hint = document.getElementById('maturityHint');
     if (mat) {
       const dl = daysBetween(fmt.dateFull(new Date()), mat);
-      hint.textContent = `到期日：${mat}${dl !== null && dl >= 0 ? `（还有 ${dl} 天）` : ''}；到期前一个月、一周、一天及当天会提醒`;
+      hint.textContent = `到期日：${mat}${dl !== null && dl >= 0 ? `（还有 ${dl} 天）` : ''}；利息自购入日起按实际持有天数计算；到期前一个月、一周、一天及当天会提醒`;
     } else {
       hint.textContent = '请选择购入日期以计算到期日';
     }
@@ -2672,18 +2716,40 @@ function saveAccount() {
     if (oldAcc && Math.abs(balance - oldAcc.balance) >= 0.005) {
       Store.setAccountBalance(editingAccountId, balance, `余额调整 · ${name}`);
     }
+
+    // 定存补录：购入日改早时，补齐「新购入日 → 原购入日」区间利息
+    // 该区间一定早于原有计息起点，因此与已计息区间不重叠，不会重复计息
+    let backfillDays = 0, backfillInterest = 0;
+    if (t.rateKind === 'bank_fixed' && oldAcc && oldAcc.purchaseDate && fields.purchaseDate &&
+        fields.purchaseDate < oldAcc.purchaseDate) {
+      backfillDays = daysBetween(fields.purchaseDate, oldAcc.purchaseDate);
+      const rate = (fields.interestRate || 0) / 100 / 365;
+      backfillInterest = Math.round(Math.abs(balance) * rate * backfillDays * 100) / 100;
+      if (backfillInterest > 0.005) {
+        const cur = Store.getAccount(editingAccountId).balance;
+        Store.setAccountBalance(editingAccountId, Math.round((cur + backfillInterest) * 100) / 100,
+          `定存补录计息 · ${name}（${backfillDays}天）`);
+      }
+    }
+
     // 不动产估值历史
     if (t.rateKind === 'estate' && oldAcc && Math.abs(balance - oldAcc.balance) >= 0.005) {
       const hist = (oldAcc.valuationHistory || []).filter(h => h.date !== today);
       hist.push({ date: today, value: balance });
       Store.updateAccount(editingAccountId, { valuationHistory: hist });
     }
-    toast('账户已更新');
+    toast(backfillInterest > 0.005
+      ? `账户已更新，并自新购入日补齐 ${backfillDays} 天利息 ¥${backfillInterest}`
+      : '账户已更新');
     editingAccountId = null;
   } else {
+    // 定期存款支持后期补录：计息游标初始为「购入日」而非录入日，首次刷新即按实际持有天数补齐利息
     const acc = { name, type: selectedAccType, balance, lastInterestDate: today, ...fields };
+    if (t.rateKind === 'bank_fixed') {
+      acc.lastInterestDate = fields.purchaseDate || today;
+      acc.maturityNotified = {};
+    }
     if (t.rateKind === 'estate') acc.valuationHistory = [{ date: today, value: balance }];
-    if (t.rateKind === 'bank_fixed') acc.maturityNotified = {};
     Store.addAccount(acc);
     toast('账户已添加');
   }
@@ -3516,8 +3582,8 @@ async function importData(event) {
  * ============================================================ */
 const UpdateChecker = {
   // 与 android/app/build.gradle 保持一致，由发版脚本自动同步
-  VERSION_CODE: 5,
-  VERSION_NAME: '1.0.4',
+  VERSION_CODE: 6,
+  VERSION_NAME: '1.0.5',
 
   // 更新源：优先 jsDelivr（国内可达），失败回退 GitHub 原生地址
   MANIFEST_URLS: [
