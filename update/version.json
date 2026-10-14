@@ -1,8 +1,8 @@
 {
-    "versionCode":  7,
-    "versionName":  "1.0.6",
-    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.6.apk",
-    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.6.apk",
-    "changelog":  "补录历史收支自动重算利息：补录流水时按账户逐日增长率补齐『流水日期→今天』区间利息差额，编辑/删除流水自动反向撤销；账户页卡片改为折叠式，默认单行显示账户名与金额，点击展开详情，切换账户时自动手风琴折叠",
-    "publishedAt":  "2026-10-14"
+    "versionCode":  8,
+    "versionName":  "1.0.7",
+    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.7.apk",
+    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.7.apk",
+    "changelog":  "新增「贵金属」账户类型：添加账户并选择品种（黄金/白银/铂金/钯金）后，自动获取行情源的每日涨跌并日结计算当日盈亏；行情取东方财富（主力）/新浪（备选）公开数据源，仅内存缓存不落库",
+    "publishedAt":  "2026-10-15"
 }

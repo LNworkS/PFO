@@ -32,5 +32,8 @@
 Thumbs.db
 .DS_Store
 
+# ===== 工具缓存（HTML 分享包，不入库）=====
+/.trae-html-share-packages/
+
 # 根目录下的临时构建产物（正式安装包归档在 releases/）
 /智能记账.apk

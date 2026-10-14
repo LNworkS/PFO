@@ -822,6 +822,16 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
         </div>
         <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;" id="matchedStockHint">按前复权收盘价每日涨跌自动计算当日盈亏</div>
       </div>
+      <div class="form-group" id="metalGroup" style="display:none;">
+        <label class="form-label">贵金属品种</label>
+        <select class="form-select" id="metalKindSelect" onchange="onMetalKindChange()">
+          <option value="gold">🥇 黄金（上海期货交易所 · 沪金主连）</option>
+          <option value="silver">🥈 白银（上海期货交易所 · 沪银主连）</option>
+          <option value="platinum">⚪ 铂金（伦敦现货铂金）</option>
+          <option value="palladium">⚫ 钯金（伦敦现货钯金）</option>
+        </select>
+        <div style="font-size:.72rem;color:var(--text-3);margin-top:6px;" id="matchedMetalHint">按该品种价格每日涨跌自动计算当日盈亏</div>
+      </div>
       <div class="form-group" id="manualRateGroup" style="display:none;">
         <label class="form-label" id="manualRateLabel">自定义年化利率（%）</label>
         <div class="rate-input-wrap">
@@ -1220,8 +1230,8 @@ const Store = {
       if (rateKind === 'estate' || rateKind === 'none') { acc.lastInterestDate = todayStr; return; }
 
       const liability = isLiability(acc);
-      // 基金/股票按当日涨跌幅逐日复算市值；其余按年化利率逐日计息
-      const isMarket = rateKind === 'fund_nav' || rateKind === 'stock';
+      // 基金/股票/贵金属按当日涨跌幅逐日复算市值；其余按年化利率逐日计息
+      const isMarket = rateKind === 'fund_nav' || rateKind === 'stock' || rateKind === 'metal';
       // 本金取绝对值：负债存为负数，单独计息后回写为更小的负数（欠款增加）
       let principal = Math.abs(acc.balance);
       let accInterest = 0;
@@ -1243,7 +1253,7 @@ const Store = {
         const rateInfo = getAccountRateInfo(acc);
         const gain = accInterest > 0;
         const label = isMarket
-          ? `${rateKind === 'stock' ? '股票' : '基金'}${gain ? '上涨' : '下跌'}`
+          ? `${rateKind === 'stock' ? '股票' : rateKind === 'metal' ? '贵金属' : '基金'}${gain ? '上涨' : '下跌'}`
           : (liability ? '自动计息（资金成本）' : '自动计息');
         newTxns.push({
           id: 'txn_int_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
@@ -1775,7 +1785,7 @@ const CATEGORIES = {
 };
 
 /**
- * 账户类型体系（12 类，分资产/负债）
+ * 账户类型体系（13 类，分资产/负债）
  * side: asset 资产 / liability 负债
  * rateKind:
  *   none       不计息
@@ -1784,10 +1794,11 @@ const CATEGORIES = {
  *   fund        货币理财，按公开行情源每日刷新（fundCode，7 日年化）
  *   fund_nav    基金，按单位净值每日涨跌计算盈亏（fundCode）
  *   stock       股票，按收盘价每日涨跌计算盈亏（stockCode/stockMarket）
+ *   metal       贵金属，按品种现货/期货价格每日涨跌计算盈亏（metalKind）
  *   manual      手动年化利率（interestRate）
  *   estate      不动产估值（无利息，手动估值 + 估值历史）
  *
- * fund_nav / stock 为双模：绑定代码后按行情涨跌计盈亏；未绑定时代替以
+ * fund_nav / stock / metal 为双模：绑定标的后按行情涨跌计盈亏；未绑定时代替以
  * 手动年化利率（interestRate）计息，以兼容旧数据并允许用户只用手动利率。
  */
 const ACCOUNT_TYPES = [
@@ -1798,6 +1809,7 @@ const ACCOUNT_TYPES = [
   { id: 'money',      name: '货币理财', emoji: '💳', side: 'asset',     rateKind: 'fund' },
   { id: 'account',    name: '基金',     emoji: '💹', side: 'asset',     rateKind: 'fund_nav' },
   { id: 'stock',      name: '股票',     emoji: '📈', side: 'asset',     rateKind: 'stock' },
+  { id: 'metal',      name: '贵金属',   emoji: '🥇', side: 'asset',     rateKind: 'metal' },
   { id: 'insurance',  name: '保险',     emoji: '🛡️', side: 'asset',     rateKind: 'manual' },
   { id: 'estate',     name: '不动产',   emoji: '🏠', side: 'asset',     rateKind: 'estate' },
   { id: 'receivable', name: '应收款',   emoji: '📥', side: 'asset',     rateKind: 'none' },
@@ -1811,6 +1823,17 @@ function accTypeOf(acc) {
   return ACCOUNT_TYPES.find(t => t.id === acc.type) || { id: acc.type, name: '账户', emoji: '📦', side: 'asset', rateKind: 'manual' };
 }
 function isLiability(acc) { return accTypeOf(acc).side === 'liability'; }
+
+/* 贵金属品种：仅按每日涨跌幅计算市值盈亏，不涉及绝对价格。
+ * 各品种映射到行情源各自的代码（见 QuoteFeed.metal）：
+ *   黄金/白银 → 上海期货交易所主连（人民币计价）；铂金/钯金 → 伦敦现货。 */
+const METAL_KINDS = [
+  { id: 'gold',      name: '黄金', emoji: '🥇' },
+  { id: 'silver',    name: '白银', emoji: '🥈' },
+  { id: 'platinum',  name: '铂金', emoji: '⚪' },
+  { id: 'palladium', name: '钯金', emoji: '⚫' },
+];
+function metalKindOf(id) { return METAL_KINDS.find(k => k.id === id) || null; }
 
 /* ============================================================
  * 官方利率数据库
@@ -2052,13 +2075,15 @@ function getRateForDate(acc, dateStr) {
  */
 function getDailyGrowth(acc, dateStr) {
   const rk = accTypeOf(acc).rateKind;
-  if (rk === 'fund_nav' || rk === 'stock') {
-    const kind = rk === 'fund_nav' ? 'nav' : 'stock';
-    const bound = rk === 'fund_nav'
-      ? !!acc.fundCode
-      : (acc.stockCode !== undefined && acc.stockCode !== '' && acc.stockMarket !== undefined && acc.stockMarket !== '');
-    if (bound) {
-      const code = kind === 'nav' ? acc.fundCode : acc.stockMarket + '.' + acc.stockCode;
+  if (rk === 'fund_nav' || rk === 'stock' || rk === 'metal') {
+    const kind = rk === 'fund_nav' ? 'nav' : (rk === 'stock' ? 'stock' : 'metal');
+    let code = '';
+    if (rk === 'fund_nav') code = acc.fundCode || '';
+    else if (rk === 'stock') {
+      code = (acc.stockCode !== undefined && acc.stockCode !== '' && acc.stockMarket !== undefined && acc.stockMarket !== '')
+        ? acc.stockMarket + '.' + acc.stockCode : '';
+    } else code = acc.metalKind || '';
+    if (code) {
       const ch = QuoteFeed.changeOn(kind, code, dateStr);
       if (ch !== null) return ch;
     }
@@ -2116,6 +2141,16 @@ function getAccountRateInfo(acc) {
       }
       if (acc.interestRate > 0) return { rate: acc.interestRate, metric: 'annual', source: '自定义年化利率（未绑定股票）' };
       return { rate: 0, metric: 'annual', source: bound ? '股票行情待刷新' : '未绑定股票，未跟踪行情' };
+    }
+    case 'metal': {
+      const mk = acc.metalKind || '';
+      const label = (metalKindOf(mk) || {}).name || '贵金属';
+      if (mk && QuoteFeed.has('metal', mk)) {
+        const ch = QuoteFeed.changeOn('metal', mk, today);
+        return { rate: 0, metric: 'daily', changePct: (ch === null ? 0 : ch * 100), source: `贵金属${label}行情（实时）` };
+      }
+      if (acc.interestRate > 0) return { rate: acc.interestRate, metric: 'annual', source: '自定义年化利率（未选择贵金属品种）' };
+      return { rate: 0, metric: 'annual', source: mk ? '贵金属行情待刷新' : '未选择贵金属品种，未跟踪行情' };
     }
     case 'manual':
       return { rate: acc.interestRate || 0, source: isLiability(acc) ? '自定义资金成本利率' : '自定义年化利率' };
@@ -2397,6 +2432,8 @@ function openAccountModal(accountId) {
   document.getElementById('accountStockName').value = '';
   document.getElementById('stockMatchResults').innerHTML = '';
   document.getElementById('matchedStockHint').textContent = '按前复权收盘价每日涨跌自动计算当日盈亏';
+  document.getElementById('metalKindSelect').value = 'gold';
+  document.getElementById('matchedMetalHint').textContent = '按该品种价格每日涨跌自动计算当日盈亏';
   document.getElementById('estateKindSelect').value = 'house';
   document.getElementById('accountPurchaseDate').value = '';
   document.getElementById('fixedRateModeSelect').value = 'policy';
@@ -2428,6 +2465,7 @@ function openAccountModal(accountId) {
           pendingStock = { code: acc.stockCode, market: acc.stockMarket, name: acc.stockName || '' };
         }
       }
+      if (acc.metalKind) document.getElementById('metalKindSelect').value = acc.metalKind;
       if (acc.bankId) document.getElementById('bankSelect').value = acc.bankId;
       if (acc.depositType && acc.depositType !== 'current') document.getElementById('depositTypeSelect').value = acc.depositType;
       if (acc.estateKind) document.getElementById('estateKindSelect').value = acc.estateKind;
@@ -2470,7 +2508,8 @@ function updateAccTypeFields() {
   const isMoneyFund = t.rateKind === 'fund';
   const isFundNav = t.rateKind === 'fund_nav';
   const isStock = t.rateKind === 'stock';
-  const isMarket = isFundNav || isStock;
+  const isMetal = t.rateKind === 'metal';
+  const isMarket = isFundNav || isStock || isMetal;
   const fixedManual = isFixed && document.getElementById('fixedRateModeSelect').value === 'manual';
 
   // 新定存账户默认购入日期为今天
@@ -2485,6 +2524,7 @@ function updateAccTypeFields() {
   document.getElementById('manualRateGroup').style.display = (t.rateKind === 'manual' || fixedManual || isMarket) ? 'block' : 'none';
   document.getElementById('fundCodeGroup').style.display = (isMoneyFund || isFundNav) ? 'block' : 'none';
   document.getElementById('stockGroup').style.display = isStock ? 'block' : 'none';
+  document.getElementById('metalGroup').style.display = isMetal ? 'block' : 'none';
   document.getElementById('estateGroup').style.display = (t.rateKind === 'estate') ? 'block' : 'none';
 
   // 基金组文案：货币理财按 7 日年化，基金按单位净值
@@ -2502,7 +2542,9 @@ function updateAccTypeFields() {
     document.getElementById('manualRateHint').textContent = '定存利率固定不变，仅在购入与到期续存时更新';
   } else if (isMarket) {
     document.getElementById('manualRateLabel').textContent = '自定义年化利率（%）';
-    document.getElementById('manualRateHint').textContent = `未绑定${isStock ? '股票' : '基金'}代码时按此利率逐日计息；绑定后改为按${isStock ? '收盘价' : '单位净值'}涨跌计算当日盈亏`;
+    document.getElementById('manualRateHint').textContent = isMetal
+      ? '行情不可用（未选品种或数据源失效）时按此利率逐日计息；正常时改为按品种价格涨跌计算当日盈亏'
+      : `未绑定${isStock ? '股票' : '基金'}代码时按此利率逐日计息；绑定后改为按${isStock ? '收盘价' : '单位净值'}涨跌计算当日盈亏`;
   }
 
   const balLabel = document.getElementById('balanceLabel');
@@ -2526,6 +2568,11 @@ function updateAccTypeFields() {
 
   document.getElementById('ratePreviewGroup').style.display =
     (t.rateKind === 'none' || t.rateKind === 'estate' || fixedManual) ? 'none' : 'block';
+  // 贵金属：预取所选品种行情后刷新预览
+  if (isMetal) {
+    const mk = document.getElementById('metalKindSelect').value;
+    if (mk) QuoteFeed.fetch('metal', mk).then(() => updateRatePreview()).catch(() => {});
+  }
   updateRatePreview();
 }
 
@@ -2555,6 +2602,7 @@ function updateRatePreview() {
     stockCode: document.getElementById('accountStockCode')?.value.trim() || undefined,
     stockMarket: pendingStock ? pendingStock.market : undefined,
     stockName: pendingStock ? pendingStock.name : undefined,
+    metalKind: document.getElementById('metalKindSelect')?.value,
     interestRate: parseFloat(document.getElementById('accountInterestRate')?.value) || 0,
   };
   const info = getAccountRateInfo(tempAcc);
@@ -2723,6 +2771,15 @@ async function searchStockProduct() {
   }
 }
 
+/* ---------- 贵金属品种 ---------- */
+function onMetalKindChange() {
+  const mk = document.getElementById('metalKindSelect').value;
+  const k = metalKindOf(mk);
+  document.getElementById('matchedMetalHint').textContent = `按${k ? k.name : '贵金属'}价格每日涨跌自动计算当日盈亏`;
+  if (mk) QuoteFeed.fetch('metal', mk).then(() => updateRatePreview()).catch(() => {});
+  updateRatePreview();
+}
+
 function saveAccount() {
   const name = document.getElementById('accountName').value.trim();
   if (!name) { toast('请输入账户名称'); return; }
@@ -2763,6 +2820,9 @@ function saveAccount() {
     fields.stockCode = code || '';
     fields.stockMarket = (code && pendingStock) ? (pendingStock.market || '') : '';
     fields.stockName = (code && pendingStock) ? (pendingStock.name || '') : '';
+    fields.interestRate = parseFloat(document.getElementById('accountInterestRate').value) || 0;
+  } else if (t.rateKind === 'metal') {
+    fields.metalKind = document.getElementById('metalKindSelect').value || '';
     fields.interestRate = parseFloat(document.getElementById('accountInterestRate').value) || 0;
   } else if (t.rateKind === 'manual') {
     fields.interestRate = parseFloat(document.getElementById('accountInterestRate').value) || 0;
@@ -3128,6 +3188,9 @@ function renderAccounts() {
       typeDetail = `${typeInfo.name} · ${a.fundName}`;
     } else if (a.type === 'stock' && a.stockName) {
       typeDetail = `${typeInfo.name} · ${a.stockName}`;
+    } else if (a.type === 'metal') {
+      const mk = metalKindOf(a.metalKind);
+      typeDetail = `${typeInfo.name} · ${mk ? mk.name : '未选择品种'}`;
     } else if (a.type === 'estate') {
       const kind = (ESTATE_KINDS.find(k => k.id === a.estateKind) || {}).name || '不动产';
       typeDetail = `${typeInfo.name} · ${kind}`;
@@ -3665,8 +3728,8 @@ async function importData(event) {
  * ============================================================ */
 const UpdateChecker = {
   // 与 android/app/build.gradle 保持一致，由发版脚本自动同步
-  VERSION_CODE: 7,
-  VERSION_NAME: '1.0.6',
+  VERSION_CODE: 8,
+  VERSION_NAME: '1.0.7',
 
   // 更新源：优先 jsDelivr（国内可达），失败回退 GitHub 原生地址
   MANIFEST_URLS: [
@@ -3999,6 +4062,14 @@ const RateFeed = {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return src.parseJson(await res.json());
   },
+  // 文本型响应（如新浪 JSONP），由 parseText 自行解析
+  async loadText(src, url) {
+    const opt = { cache: 'no-store' };
+    if (src.headers) opt.headers = src.headers;
+    const res = await fetch(url, opt);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return src.parseText(await res.text());
+  },
 
   // 查询某天适用的利率（同步，读内存缓存；没有则返回 null 由调用方回退到内置表）
   rateOn(code, dateStr) {
@@ -4058,12 +4129,19 @@ const RateFeed = {
 /* ============================================================
  * 基金净值 / 股票价格行情源
  *
- * 用途：「基金」「股票」两类账户按当日涨跌幅逐日复算市值（当日盈亏）
+ * 用途：「基金」「股票」「贵金属」账户按当日涨跌幅逐日复算市值（当日盈亏）
  * - 涨跌幅 = 当日单位净值（或前复权收盘价）/ 前一交易日值 - 1
  * - 仅内存缓存，不写入本地数据库；按「主力 → 备选」顺序静默切换
  * - 复用 RateFeed.loadScript / loadHttp 加载器与失败重试思路
- * - 标识约定：nav 传 6 位基金代码；stock 传 secid（如 1.600519）
+ * - 标识约定：nav 传 6 位基金代码；stock 传 secid（如 1.600519）；metal 传品种 id（gold/silver/platinum/palladium）
  * ============================================================ */
+const METAL_SYMBOL = {
+  gold:      { em: '113.aum', sina: 'AU0' },  // 沪金主连（人民币/克）
+  silver:    { em: '113.agm', sina: 'AG0' },  // 沪银主连（人民币/千克）
+  platinum:  { em: '',        sina: 'XPT' },  // 伦敦铂金（美元/盎司）
+  palladium: { em: '',        sina: 'XPD' },  // 伦敦钯金（美元/盎司）
+};
+
 const QuoteFeed = {
   SOURCES: {
     nav: [
@@ -4117,6 +4195,41 @@ const QuoteFeed = {
         },
       },
     ],
+    metal: [
+      {
+        id: 'em_metal', name: '东方财富 · 日 K 线', provider: '东方财富', transport: 'http',
+        symbol: k => (METAL_SYMBOL[k] || {}).em || '',
+        build: s => `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${s}&fields1=f1,f2,f3,f4,f5&fields2=f51,f53&klt=101&fqt=1&end=20500101&lmt=320`,
+        parseJson: j => {
+          const arr = j && j.data && j.data.klines;
+          if (!Array.isArray(arr) || !arr.length) throw new Error('数据格式异常');
+          return arr.map(s => {
+            const p = String(s).split(',');
+            return { date: p[0], value: Number(p[1]) };
+          }).filter(e => e.value > 0);
+        },
+      },
+      {
+        id: 'sina_metal', name: '新浪财经 · 期货日 K', provider: '新浪', transport: 'text',
+        headers: { 'Referer': 'https://finance.sina.com.cn/' },
+        symbol: k => {
+          const m = METAL_SYMBOL[k] || {};
+          return m.sina ? { code: m.sina, domestic: !!m.em } : '';
+        },
+        build: s => {
+          const api = s.domestic ? 'InnerFuturesNewService.getDailyKLine' : 'GlobalFuturesService.getGlobalFuturesDailyKLine';
+          return `https://stock.finance.sina.com.cn/futures/api/jsonp.php/var%20_metal=/${api}?symbol=${s.code}`;
+        },
+        parseText: t => {
+          const m = t.match(/=\s*\((\[[\s\S]*\])\)/);
+          if (!m) throw new Error('数据格式异常');
+          let arr;
+          try { arr = JSON.parse(m[1]); } catch (e) { throw new Error('数据格式异常'); }
+          if (!Array.isArray(arr) || !arr.length) throw new Error('数据格式异常');
+          return arr.map(x => ({ date: x.date || x.d, value: Number(x.close || x.c) })).filter(e => e.value > 0);
+        },
+      },
+    ],
   },
   _cache: {},   // `${kind}:${code}` -> { entries, returns, sourceName }  仅内存
   _queue: {},
@@ -4135,6 +4248,8 @@ const QuoteFeed = {
       for (let i = 0; i < list.length; i++) {
         try {
           const src = list[i];
+          // 该行情源不支持当前标（如铂金/钯金无东方财富源）则跳过
+          if (src.symbol && !src.symbol(code)) continue;
           const series = await this.load(src, code);
           // 去重并按日期升序
           const sorted = series.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -4155,8 +4270,11 @@ const QuoteFeed = {
     try { return await this._queue[k]; } finally { delete this._queue[k]; }
   },
   load(src, code) {
-    const url = src.build(code);
-    return src.transport === 'script' ? RateFeed.loadScript(src, url) : RateFeed.loadHttp(src, url);
+    const sym = src.symbol ? src.symbol(code) : code;
+    const url = src.build(sym);
+    if (src.transport === 'script') return RateFeed.loadScript(src, url);
+    if (src.parseText) return RateFeed.loadText(src, url);
+    return RateFeed.loadHttp(src, url);
   },
 
   // 某日历日的涨跌幅（小数）：非交易日/无记录返回 0；行情未取到返回 null
@@ -4182,6 +4300,7 @@ const QuoteFeed = {
       else if (rk === 'stock' && a.stockCode && a.stockMarket !== undefined && a.stockMarket !== '') {
         tasks.push(['stock', a.stockMarket + '.' + a.stockCode]);
       }
+      else if (rk === 'metal' && a.metalKind) tasks.push(['metal', a.metalKind]);
     });
     const report = { ok: [], failed: [] };
     for (const [kind, code] of tasks) {
