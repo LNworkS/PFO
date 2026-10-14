@@ -1,8 +1,8 @@
 {
-    "versionCode":  6,
-    "versionName":  "1.0.5",
-    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.5.apk",
-    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.5.apk",
-    "changelog":  "定期存款支持后期补录：新增定存时利息自「购入日」起算，按实际持有天数计息，而非从录入日起算；编辑定存并将购入日改早时，自动补齐「新购入日→原购入日」区间利息并记入流水；升级后对旧定存账户执行一次性利息追溯，按购入日追平历史利息",
+    "versionCode":  7,
+    "versionName":  "1.0.6",
+    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.6.apk",
+    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.6.apk",
+    "changelog":  "补录历史收支自动重算利息：补录流水时按账户逐日增长率补齐『流水日期→今天』区间利息差额，编辑/删除流水自动反向撤销；账户页卡片改为折叠式，默认单行显示账户名与金额，点击展开详情，切换账户时自动手风琴折叠",
     "publishedAt":  "2026-10-14"
 }

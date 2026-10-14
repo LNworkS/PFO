@@ -370,6 +370,15 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
   font-size: .76rem; color: var(--income); margin-top: 6px;
 }
 .account-card .acc-daily-interest .label-sm { color: var(--text-3); }
+/* 折叠：默认单行显示账户名与金额，点击展开详情（手风琴式，同时仅展开一个） */
+.account-card .acc-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; }
+.account-card .acc-row .acc-name { min-width: 0; }
+.account-card .acc-row-right { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.account-card .acc-row .acc-balance { margin: 0; font-size: 1.3rem; }
+.account-card .acc-caret { font-size: .68rem; color: var(--text-3); }
+.account-card .acc-detail { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.account-card .acc-source { font-size: .68rem; color: var(--text-3); margin-top: 6px; }
+.account-card .liab-tag { font-size: .66rem; color: var(--expense); background: var(--expense-bg); border-radius: 6px; padding: 1px 6px; }
 
 .total-balance-banner {
   background: linear-gradient(135deg, var(--primary), var(--primary-light));
@@ -1307,6 +1316,7 @@ const Store = {
   addTxn(txn) {
     txn.id = 'txn_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
     txn.createdAt = new Date().toISOString();
+    this.applyTxnInterest(txn);
     this.data.transactions.unshift(txn);
     this.updateAccountBalance(txn);
     this.save();
@@ -1314,8 +1324,10 @@ const Store = {
   updateTxn(id, updates) {
     const txn = this.data.transactions.find(t => t.id === id);
     if (!txn) return;
+    this.reverseTxnInterest(txn);
     this.reverseAccountBalance(txn);
     Object.assign(txn, updates);
+    this.applyTxnInterest(txn);
     this.updateAccountBalance(txn);
     this.save();
   },
@@ -1323,9 +1335,64 @@ const Store = {
     const idx = this.data.transactions.findIndex(t => t.id === id);
     if (idx < 0) return;
     const txn = this.data.transactions[idx];
+    this.reverseTxnInterest(txn);
     this.reverseAccountBalance(txn);
     this.data.transactions.splice(idx, 1);
     this.save();
+  },
+  // 补录历史流水：该笔金额若在「流水日期」当天发生，与今天入账相比，
+  // 会多/少产生 (日期→今天] 区间的利息，故按逐日增长率补齐这部分差额。
+  // 出账/转出（余额变少）会减少后续利息；入账/转入则相反。返回该差额。
+  backdatedInterestAdj(acc, dateStr, amountSign) {
+    const rk = accTypeOf(acc).rateKind;
+    if (rk === 'estate' || rk === 'none') return 0;
+    if (rk === 'fund_nav' || rk === 'stock') {
+      // 行情类账户依赖已加载的行情序列，未就绪时不计算，避免误算市值
+      const kind = rk === 'fund_nav' ? 'nav' : 'stock';
+      const code = rk === 'fund_nav' ? acc.fundCode
+        : (acc.stockCode && acc.stockMarket ? acc.stockMarket + '.' + acc.stockCode : '');
+      if (!code || !QuoteFeed.has(kind, code)) return 0;
+    }
+    const todayStr = fmt.dateFull(new Date());
+    const startMs = new Date(dateStr + 'T00:00:00').getTime();
+    const days = Math.round((new Date(todayStr + 'T00:00:00').getTime() - startMs) / 86400000);
+    if (days <= 0) return 0;
+    let factor = 1;
+    for (let i = 1; i <= days; i++) {
+      const d = new Date(startMs);
+      d.setDate(d.getDate() + i);
+      factor *= (1 + getDailyGrowth(acc, fmt.dateFull(d)));
+    }
+    return Math.round(amountSign * (factor - 1) * 100) / 100;
+  },
+  applyTxnInterest(txn) {
+    const adj = {};
+    const add = (accId, sign) => {
+      const acc = this.getAccount(accId);
+      if (!acc || !txn.date || !sign) return;
+      const v = this.backdatedInterestAdj(acc, txn.date, sign);
+      if (Math.abs(v) > 0.005) {
+        acc.balance = Math.round((acc.balance + v) * 100) / 100;
+        adj[accId] = v;
+      }
+    };
+    if (txn.type === 'transfer') {
+      add(txn.accountId, -txn.amount);
+      add(txn.toAccountId, txn.amount);
+    } else if (txn.type === 'expense') {
+      add(txn.accountId, -txn.amount);
+    } else if (txn.type === 'income') {
+      add(txn.accountId, txn.amount);
+    }
+    txn.interestAdj = adj;
+  },
+  reverseTxnInterest(txn) {
+    const adj = txn.interestAdj || {};
+    Object.keys(adj).forEach(accId => {
+      const acc = this.getAccount(accId);
+      if (acc) acc.balance = Math.round((acc.balance - adj[accId]) * 100) / 100;
+    });
+    delete txn.interestAdj;
   },
   updateAccountBalance(txn) {
     if (txn.type === 'expense') {
@@ -3010,6 +3077,13 @@ function renderTxnList() {
 /* ============================================================
  * 账户管理页
  * ============================================================ */
+// 账户卡片手风琴：同一时间只展开一个，再次点击当前项则折叠
+let expandedAccountId = null;
+function toggleAccountCard(id) {
+  expandedAccountId = (expandedAccountId === id) ? null : id;
+  renderAccounts();
+}
+
 function renderAccounts() {
   const accounts = Store.getAccounts();
   const todayStr = fmt.dateFull(new Date());
@@ -3036,6 +3110,7 @@ function renderAccounts() {
   }
   grid.innerHTML = accounts.map(a => {
     const typeInfo = accTypeOf(a);
+    const isExpanded = expandedAccountId === a.id;
     const liab = typeInfo.side === 'liability';
     const rateInfo = getAccountRateInfo(a);
     const absBal = Math.abs(a.balance);
@@ -3085,19 +3160,27 @@ function renderAccounts() {
       ? `<button onclick="renewFixedDeposit('${a.id}')">续存</button>` : '';
 
     return `
-      <div class="account-card">
-        <div class="acc-name">${typeInfo.emoji} ${escapeHtml(a.name)}${liab ? ' <span style="font-size:.66rem;color:var(--expense);background:var(--expense-bg);border-radius:6px;padding:1px 6px;">负债</span>' : ''}</div>
-        <div class="acc-type">${escapeHtml(typeDetail)}</div>
-        <div class="acc-balance">${liab ? '-' : ''}<span class="currency-sm">¥</span>${fmt.money(absBal)}</div>
-        ${rateHtml}
-        ${maturityHtml}
-        <div style="font-size:.68rem;color:var(--text-3);margin-top:4px;">来源：${rateInfo.source}</div>
-        ${dailyHtml}
-        <div class="acc-actions">
-          <button onclick="openAccountModal('${a.id}')">编辑</button>
-          ${renewBtn}
-          <button onclick="deleteAccountConfirm('${a.id}')">删除</button>
+      <div class="account-card${isExpanded ? ' expanded' : ' collapsed'}">
+        <div class="acc-row" onclick="toggleAccountCard('${a.id}')">
+          <div class="acc-name">${typeInfo.emoji} ${escapeHtml(a.name)}${liab ? ' <span class="liab-tag">负债</span>' : ''}</div>
+          <div class="acc-row-right">
+            <div class="acc-balance">${liab ? '-' : ''}<span class="currency-sm">¥</span>${fmt.money(absBal)}</div>
+            <div class="acc-caret">${isExpanded ? '▲' : '▼'}</div>
+          </div>
         </div>
+        ${isExpanded ? `
+        <div class="acc-detail">
+          <div class="acc-type">${escapeHtml(typeDetail)}</div>
+          ${rateHtml}
+          ${maturityHtml}
+          <div class="acc-source">来源：${rateInfo.source}</div>
+          ${dailyHtml}
+          <div class="acc-actions">
+            <button onclick="openAccountModal('${a.id}')">编辑</button>
+            ${renewBtn}
+            <button onclick="deleteAccountConfirm('${a.id}')">删除</button>
+          </div>
+        </div>` : ''}
       </div>
     `;
   }).join('');
@@ -3582,8 +3665,8 @@ async function importData(event) {
  * ============================================================ */
 const UpdateChecker = {
   // 与 android/app/build.gradle 保持一致，由发版脚本自动同步
-  VERSION_CODE: 6,
-  VERSION_NAME: '1.0.5',
+  VERSION_CODE: 7,
+  VERSION_NAME: '1.0.6',
 
   // 更新源：优先 jsDelivr（国内可达），失败回退 GitHub 原生地址
   MANIFEST_URLS: [
