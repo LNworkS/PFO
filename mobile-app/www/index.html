@@ -197,6 +197,18 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .txn-actions button:hover { background: var(--bg); color: var(--text); }
 .txn-actions button.del:hover { background: var(--expense-bg); color: var(--expense); }
 
+/* 自动计息汇总行：多笔当日计息折叠为一条，点击展开 */
+.txn-group-head { cursor: pointer; }
+.txn-group-head .txn-cat-icon { background: var(--primary-bg); color: var(--primary); }
+.txn-group-chevron {
+  font-size: .8rem; color: var(--text-3); width: 20px; text-align: center;
+  flex-shrink: 0; transition: transform .2s;
+}
+.txn-group-head.expanded .txn-group-chevron { transform: rotate(90deg); }
+.txn-group-children { display: flex; flex-direction: column; background: var(--bg); border-radius: 10px; margin: 2px 0 6px; padding: 0 10px; }
+.txn-group-children .txn-item { border-bottom: 1px solid var(--border); }
+.txn-group-children .txn-item:last-child { border-bottom: none; }
+
 /* 空状态 */
 .empty-state { text-align: center; padding: 48px 20px; color: var(--text-3); }
 .empty-state .emoji { font-size: 3rem; margin-bottom: 12px; }
@@ -2984,7 +2996,7 @@ function renderDashboard() {
   `;
 
   // 最近交易
-  const recent = Store.getTransactions().slice(0, 6);
+  const recent = sortTxnsByDate(Store.getTransactions()).slice(0, 6);
   const listEl = document.getElementById('recentTxnList');
   if (recent.length === 0) {
     listEl.innerHTML = `<div class="empty-state"><div class="emoji">📭</div><div class="text">还没有交易记录<br>点击右下角 + 开始记账</div></div>`;
@@ -3035,6 +3047,65 @@ function renderDashboardTrendChart(txns, ym) {
       }
     }
   });
+}
+
+/* 明细排序：先按记录内设置的日期倒序，同一天再按保存时间倒序 */
+function sortTxnsByDate(list) {
+  return [...list].sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    const ac = a.createdAt || '';
+    const bc = b.createdAt || '';
+    if (ac !== bc) return ac < bc ? 1 : -1;
+    return 0;
+  });
+}
+
+/* 自动计息汇总：同一天的多笔自动计息折叠为一条（与触发时间无关） */
+let expandedInterestGroups = new Set();
+function toggleInterestGroup(key) {
+  if (expandedInterestGroups.has(key)) expandedInterestGroups.delete(key);
+  else expandedInterestGroups.add(key);
+  renderTxnList();
+}
+
+function renderInterestGroup(group) {
+  const n = group.items.length;
+  const income = group.items.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const expense = group.items.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  const net = income - expense;
+  const amountClass = net > 0 ? 'income' : (net < 0 ? 'expense' : '');
+  const expanded = expandedInterestGroups.has(group.key);
+  const accounts = [...new Set(group.items.map(t => (Store.getAccount(t.accountId) || {}).name || '未知账户'))];
+  const head = `
+    <div class="txn-item txn-group-head${expanded ? ' expanded' : ''}" onclick="toggleInterestGroup('${group.key}')">
+      <div class="txn-cat-icon">💰</div>
+      <div class="txn-info">
+        <div class="cat">自动计息 · ${n} 笔</div>
+        <div class="meta">${fmt.date(group.date)} · ${escapeHtml(accounts.join('、'))}${expanded ? '' : ' · 点击展开'}</div>
+      </div>
+      <div class="txn-amount ${amountClass}">${fmt.money(Math.abs(net))}</div>
+      <div class="txn-group-chevron">▶</div>
+    </div>`;
+  const children = expanded
+    ? `<div class="txn-group-children">${group.items.map(renderTxnItem).join('')}</div>`
+    : '';
+  return head + children;
+}
+
+/* 排序后把同一天的自动计息条目合并为一组（其余条目保持原序） */
+function groupInterestTxns(list) {
+  const rows = [];
+  const groupIndex = new Map();
+  sortTxnsByDate(list).forEach(t => {
+    if (!t.isAutoInterest) { rows.push({ txn: t }); return; }
+    const key = 'int_' + t.date;
+    const g = groupIndex.get(key);
+    if (g) { g.items.push(t); return; }
+    const group = { key, date: t.date, items: [t] };
+    groupIndex.set(key, group);
+    rows.push({ group });
+  });
+  return rows;
 }
 
 function renderTxnItem(t) {
@@ -3131,7 +3202,11 @@ function renderTxnList() {
     listEl.innerHTML = `<div class="empty-state"><div class="emoji">🔍</div><div class="text">没有符合条件的交易记录</div></div>`;
     return;
   }
-  listEl.innerHTML = txns.map(renderTxnItem).join('');
+
+  // 排序后把同一天的自动计息条目合并为一组（默认折叠，点击展开）
+  listEl.innerHTML = groupInterestTxns(txns).map(r => r.group
+    ? (r.group.items.length > 1 ? renderInterestGroup(r.group) : renderTxnItem(r.group.items[0]))
+    : renderTxnItem(r.txn)).join('');
 }
 
 /* ============================================================
@@ -3444,7 +3519,7 @@ function switchReport(type) {
     });
     detailEl.innerHTML = '';
   } else if (type === 'daily') {
-    const sorted = [...txns].sort((a,b) => new Date(b.date) - new Date(a.date));
+    const sorted = sortTxnsByDate(txns);
     if (sorted.length === 0) {
       detailEl.innerHTML = `<div class="empty-state"><div class="emoji">📅</div><div class="text">本月没有交易记录</div></div>`;
       return;
@@ -3728,8 +3803,8 @@ async function importData(event) {
  * ============================================================ */
 const UpdateChecker = {
   // 与 android/app/build.gradle 保持一致，由发版脚本自动同步
-  VERSION_CODE: 8,
-  VERSION_NAME: '1.0.7',
+  VERSION_CODE: 9,
+  VERSION_NAME: '1.0.8',
 
   // 更新源：优先 jsDelivr（国内可达），失败回退 GitHub 原生地址
   MANIFEST_URLS: [

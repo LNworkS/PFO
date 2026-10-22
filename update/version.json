@@ -1,8 +1,8 @@
 {
-    "versionCode":  8,
-    "versionName":  "1.0.7",
-    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.7.apk",
-    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.7.apk",
-    "changelog":  "新增「贵金属」账户类型：添加账户并选择品种（黄金/白银/铂金/钯金）后，自动获取行情源的每日涨跌并日结计算当日盈亏；行情取东方财富（主力）/新浪（备选）公开数据源，仅内存缓存不落库",
-    "publishedAt":  "2026-10-15"
+    "versionCode":  9,
+    "versionName":  "1.0.8",
+    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.8.apk",
+    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.8.apk",
+    "changelog":  "明细排序改为先按记录内设置的日期倒序、同一天再按保存时间倒序；当日多笔自动计息折叠为一条汇总展示，点击可展开查看各账户明细（同日触发时间不同也会汇总）",
+    "publishedAt":  "2026-10-23"
 }
