@@ -209,6 +209,35 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .txn-group-children .txn-item { border-bottom: 1px solid var(--border); }
 .txn-group-children .txn-item:last-child { border-bottom: none; }
 
+/* ===== 指纹解锁 / 自动化 ===== */
+.auth-bio-btn {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  margin-top: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+.auth-bio-btn:active { background: var(--bg); }
+.setting-state {
+  font-size: .72rem; color: var(--text-3); padding: 2px 10px;
+  border-radius: 999px; background: var(--bg); flex-shrink: 0;
+}
+.setting-state.on { background: var(--primary-bg); color: var(--primary); }
+.auto-card {
+  border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+  margin-bottom: 10px; background: var(--surface);
+}
+.auto-card.off { opacity: .55; }
+.auto-card-top { display: flex; align-items: center; gap: 10px; }
+.auto-card-title { font-size: .9rem; font-weight: 600; color: var(--text); flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auto-card-sub { font-size: .74rem; color: var(--text-2); margin-top: 6px; line-height: 1.6; }
+.auto-card-acts { display: flex; gap: 4px; flex-shrink: 0; }
+.auto-card-acts button {
+  border: none; background: transparent; cursor: pointer; font-size: .9rem;
+  padding: 4px 6px; border-radius: 6px; color: var(--text-3);
+}
+.auto-card-acts button:hover { background: var(--bg); color: var(--text); }
+.auto-card-acts button.del:hover { background: var(--expense-bg); color: var(--expense); }
+.auto-empty { text-align: center; padding: 32px 12px; color: var(--text-3); font-size: .82rem; line-height: 1.8; }
+
 /* 空状态 */
 .empty-state { text-align: center; padding: 48px 20px; color: var(--text-3); }
 .empty-state .emoji { font-size: 3rem; margin-bottom: 12px; }
@@ -259,6 +288,10 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
 .type-tab.active[data-type="expense"] { color: var(--expense); }
 .type-tab.active[data-type="income"] { color: var(--income); }
 .type-tab.active[data-type="transfer"] { color: var(--transfer); }
+.type-tab.active[data-auto-type="expense"] { color: var(--expense); }
+.type-tab.active[data-auto-type="income"] { color: var(--income); }
+.type-tab.active[data-auto-type="transfer"] { color: var(--transfer); }
+.type-tab.active[data-auto-tab] { color: var(--primary); }
 
 /* 分类选择网格 */
 .cat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
@@ -557,6 +590,7 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
     <input type="password" class="auth-input" id="authPasswordConfirm" placeholder="再次输入密码" autocomplete="new-password" style="display:none;" onkeydown="if(event.key==='Enter')authSubmit()">
     <div class="auth-error" id="authError"></div>
     <button class="auth-btn" id="authBtn" onclick="authSubmit()">解锁</button>
+    <button class="auth-btn auth-bio-btn" id="authBioBtn" style="display:none;" onclick="Auth.unlockWithBiometric()">👆 指纹解锁</button>
     <div class="auth-hint" id="authHint">
       密码仅存储加盐哈希值，绝不保存明文<br>所有数据使用 AES-256-GCM 本地加密
     </div>
@@ -967,6 +1001,16 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
         <div class="info"><div class="title">修改密码</div><div class="desc">更改访问密码，数据重新加密</div></div>
         <span class="arrow">›</span>
       </div>
+      <div class="setting-item" id="biometricSettingItem" style="display:none;" onclick="toggleBiometric()">
+        <div class="icon" style="background:var(--primary-bg);color:var(--primary);">👆</div>
+        <div class="info"><div class="title">指纹解锁</div><div class="desc" id="biometricSettingDesc">使用手机指纹快速解锁应用</div></div>
+        <span class="setting-state" id="biometricSettingState">关闭</span>
+      </div>
+      <div class="setting-item" onclick="closeModal('settingsModalOverlay'); openAutomationModal()">
+        <div class="icon" style="background:var(--transfer-bg);color:var(--transfer);">⚙️</div>
+        <div class="info"><div class="title">自动化</div><div class="desc">周期收支、自动还款、余额补足</div></div>
+        <span class="arrow">›</span>
+      </div>
       <div class="setting-item" onclick="closeModal('settingsModalOverlay'); openCategoryManager()">
         <div class="icon" style="background:var(--income-bg);color:var(--income);">🏷️</div>
         <div class="info"><div class="title">分类管理</div><div class="desc">自定义收支分类，支持增删改</div></div>
@@ -996,6 +1040,191 @@ input, select, textarea { font-family: inherit; font-size: 1rem; }
       <div style="font-size:.72rem;color:var(--text-3);text-align:center;margin-top:16px;line-height:1.6;">
         所有数据经 AES-256-GCM 加密存储于本地<br>
         导出文件同样加密，需密码才能解密
+      </div>
+    </div>
+  </div>
+
+  <!-- 自动化规则模态框 -->
+  <div class="modal-overlay" id="automationModalOverlay">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <span class="modal-title">自动化</span>
+        <button class="modal-close" onclick="closeModal('automationModalOverlay')">×</button>
+      </div>
+      <div class="tab-bar" id="autoTabs">
+        <button class="type-tab active" data-auto-tab="recurring" onclick="switchAutoTab('recurring')">周期收支</button>
+        <button class="type-tab" data-auto-tab="repay" onclick="switchAutoTab('repay')">自动还款</button>
+        <button class="type-tab" data-auto-tab="topup" onclick="switchAutoTab('topup')">余额补足</button>
+      </div>
+      <div id="autoList" style="margin-top:14px;"></div>
+      <button class="btn btn-primary" style="width:100%;margin-top:12px;" onclick="openAutoForm()">+ 新增规则</button>
+      <div style="font-size:.72rem;color:var(--text-3);text-align:center;margin-top:12px;line-height:1.7;">
+        每次打开应用时自动检查并补记到期条目<br>自动记录可在「收支明细」中查看或单笔删除
+      </div>
+    </div>
+  </div>
+
+  <!-- 周期收支表单 -->
+  <div class="modal-overlay" id="autoRecurringOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="autoRecurringTitle">新增周期收支</span>
+        <button class="modal-close" onclick="closeModal('autoRecurringOverlay')">×</button>
+      </div>
+      <div class="tab-bar" id="autoTypeTabs">
+        <button class="type-tab active" data-auto-type="expense" onclick="setAutoType('expense')">支出</button>
+        <button class="type-tab" data-auto-type="income" onclick="setAutoType('income')">收入</button>
+        <button class="type-tab" data-auto-type="transfer" onclick="setAutoType('transfer')">转账</button>
+      </div>
+      <div class="form-group" style="margin-top:14px;">
+        <label class="form-label">金额</label>
+        <div class="amount-input-wrap">
+          <span class="currency">¥</span>
+          <input type="number" id="autoAmount" placeholder="0.00" step="0.01" min="0">
+        </div>
+      </div>
+      <div class="form-group" id="autoCategoryGroup">
+        <label class="form-label">分类</label>
+        <select class="form-select" id="autoCategory"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" id="autoAccountFromLabel">账户</label>
+        <select class="form-select" id="autoAccountFrom"></select>
+      </div>
+      <div class="form-group" id="autoAccountToGroup" style="display:none;">
+        <label class="form-label">转入账户</label>
+        <select class="form-select" id="autoAccountTo"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">重复频率</label>
+        <select class="form-select" id="autoFreq" onchange="updateAutoFreqFields()">
+          <option value="monthly">每月</option>
+          <option value="weekly">每周</option>
+          <option value="daily">每天</option>
+          <option value="yearly">每年</option>
+        </select>
+      </div>
+      <div class="form-group" id="autoWeekdayGroup" style="display:none;">
+        <label class="form-label">星期几</label>
+        <select class="form-select" id="autoWeekday">
+          <option value="1">周一</option><option value="2">周二</option><option value="3">周三</option>
+          <option value="4">周四</option><option value="5">周五</option><option value="6">周六</option>
+          <option value="7">周日</option>
+        </select>
+      </div>
+      <div class="form-group" id="autoDayGroup">
+        <label class="form-label">每月几号（当月没有该日期时取月末）</label>
+        <input type="number" class="form-input" id="autoDay" min="1" max="31" value="1">
+      </div>
+      <div class="form-group" id="autoMonthGroup" style="display:none;">
+        <label class="form-label">每年几月</label>
+        <select class="form-select" id="autoMonth">
+          <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+          <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+          <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+          <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">开始日期</label>
+        <input type="date" class="form-input" id="autoStart">
+      </div>
+      <div class="form-group">
+        <label class="form-label">结束日期（可选）</label>
+        <input type="date" class="form-input" id="autoEnd">
+      </div>
+      <div class="form-group">
+        <label class="form-label">备注</label>
+        <input type="text" class="form-input" id="autoNote" placeholder="如：工资、房贷">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" style="flex:1;" onclick="closeModal('autoRecurringOverlay')">取消</button>
+        <button class="btn btn-primary" style="flex:2;" onclick="saveAutoRecurring()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自动还款表单 -->
+  <div class="modal-overlay" id="autoRepayOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="autoRepayTitle">新增自动还款</span>
+        <button class="modal-close" onclick="closeModal('autoRepayOverlay')">×</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">还款账户（负债类）</label>
+        <select class="form-select" id="repayTarget"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">资金来源账户</label>
+        <select class="form-select" id="repayFrom"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">每月还款日</label>
+        <input type="number" class="form-input" id="repayDay" min="1" max="31" value="8">
+      </div>
+      <div class="form-group">
+        <label class="form-label">还款方式</label>
+        <select class="form-select" id="repayMode" onchange="updateRepayModeFields()">
+          <option value="full">还清全部欠款</option>
+          <option value="fixed">固定金额</option>
+        </select>
+      </div>
+      <div class="form-group" id="repayAmountGroup" style="display:none;">
+        <label class="form-label">每期还款金额</label>
+        <div class="amount-input-wrap">
+          <span class="currency">¥</span>
+          <input type="number" id="repayAmount" placeholder="0.00" step="0.01" min="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">备注</label>
+        <input type="text" class="form-input" id="repayNote" placeholder="如：信用卡还款">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" style="flex:1;" onclick="closeModal('autoRepayOverlay')">取消</button>
+        <button class="btn btn-primary" style="flex:2;" onclick="saveAutoRepay()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 余额补足表单 -->
+  <div class="modal-overlay" id="autoTopupOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="autoTopupTitle">新增余额补足</span>
+        <button class="modal-close" onclick="closeModal('autoTopupOverlay')">×</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">需要补足的账户</label>
+        <select class="form-select" id="topupTarget"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">余额低于此值时触发</label>
+        <div class="amount-input-wrap">
+          <span class="currency">¥</span>
+          <input type="number" id="topupThreshold" placeholder="0.00" step="0.01" min="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">每次转入金额</label>
+        <div class="amount-input-wrap">
+          <span class="currency">¥</span>
+          <input type="number" id="topupAmount" placeholder="0.00" step="0.01" min="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">资金来源账户</label>
+        <select class="form-select" id="topupFrom"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">备注</label>
+        <input type="text" class="form-input" id="topupNote" placeholder="如：交通卡充值">
+      </div>
+      <div style="font-size:.72rem;color:var(--text-3);margin-top:4px;">同一规则每天最多触发一次</div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" style="flex:1;" onclick="closeModal('autoTopupOverlay')">取消</button>
+        <button class="btn btn-primary" style="flex:2;" onclick="saveAutoTopup()">保存</button>
       </div>
     </div>
   </div>
@@ -1112,6 +1341,12 @@ const Store = {
     if (!this.data.transactions) this.data.transactions = [];
     if (!this.data.budgets) this.data.budgets = [];
     if (!this.data.settings) this.data.settings = { firstDay: 1 };
+    if (!this.data.automations || typeof this.data.automations !== 'object') {
+      this.data.automations = { recurring: [], repay: [], topup: [] };
+    }
+    ['recurring', 'repay', 'topup'].forEach(k => {
+      if (!Array.isArray(this.data.automations[k])) this.data.automations[k] = [];
+    });
     if (!this.data.categories) {
       this.data.categories = this.defaultData().categories;
     } else {
@@ -1224,6 +1459,8 @@ const Store = {
     await QuoteFeed.preload(this.data.accounts);
     this.refreshInterest();
     this._rateFeedReport = report;
+    // 补记周期收支、自动还款、余额补足（按规则日期回填，内部会自动补偿利差）
+    this._autoCreated = Automation.run();
     checkMaturityReminders();
     return report;
   },
@@ -1330,7 +1567,8 @@ const Store = {
         ],
       },
       budgets: [],
-      settings: { firstDay: 1 }
+      settings: { firstDay: 1 },
+      automations: { recurring: [], repay: [], topup: [] }
     };
   },
   // === 交易 ===
@@ -1575,9 +1813,18 @@ const Crypto = {
       { name: 'PBKDF2', salt, iterations: this.ITERATIONS, hash: 'SHA-256' },
       keyMaterial,
       { name: 'AES-GCM', length: 256 },
-      false,
+      true,   // 可导出：用于把密钥交给系统 Keystore 保管，实现指纹解锁
       ['encrypt', 'decrypt']
     );
+  },
+  // 导出/导入原始 AES 密钥（指纹解锁时由 Keystore 加密保管，仅在生物识别通过后取回）
+  async exportRawKey(key) {
+    const raw = await crypto.subtle.exportKey('raw', key);
+    return this.toBase64(new Uint8Array(raw));
+  },
+  async importRawKey(base64) {
+    const raw = this.fromBase64(base64);
+    return await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
   },
   async hashPassword(password, saltBase64) {
     const salt = this.fromBase64(saltBase64);
@@ -1606,8 +1853,42 @@ const Crypto = {
 };
 
 /* ============================================================
- * 认证模块 — 本地密码 + 加密存储
+ * 指纹解锁 — Android Keystore 保管数据密钥，仅在指纹通过后取回
  * ============================================================ */
+const Biometric = {
+  supported() {
+    const c = window.Capacitor;
+    return !!(c && c.isNativePlatform && c.isNativePlatform()
+      && c.getPlatform && c.getPlatform() === 'android'
+      && c.Plugins && c.Plugins.Biometric);
+  },
+  plugin() {
+    const c = window.Capacitor;
+    return c && c.Plugins ? c.Plugins.Biometric : null;
+  },
+  async status() {
+    if (!this.supported()) return { available: false, enabled: false };
+    try {
+      const [a, e] = await Promise.all([this.plugin().isAvailable(), this.plugin().isEnabled()]);
+      return { available: !!(a && a.available), enabled: !!(e && e.enabled) };
+    } catch (err) {
+      return { available: false, enabled: false };
+    }
+  },
+  async enable(secret) {
+    const r = await this.plugin().enable({ secret });
+    if (!r || !r.ok) throw new Error((r && r.message) || '指纹开启失败');
+  },
+  async disable() {
+    await this.plugin().disable();
+  },
+  async unlock() {
+    const r = await this.plugin().unlock();
+    if (!r || !r.secret) throw new Error('指纹解锁失败');
+    return r.secret;
+  },
+};
+
 const AUTH_KEY = 'accounting_auth_config';
 const DATA_KEY = 'accounting_encrypted_data';
 const OLD_KEY = 'accounting_app_data';
@@ -1615,6 +1896,8 @@ const OLD_KEY = 'accounting_app_data';
 const Auth = {
   isUnlocked: false,
   derivedKey: null,
+  // 指纹解锁取回的密钥不可导出，这里缓存原始 base64 以便在设置里重新开启指纹
+  _rawKeyB64: null,
   _saveTimer: null,
 
   isInitialized() {
@@ -1650,20 +1933,58 @@ const Auth = {
     const hash = await Crypto.hashPassword(password, config.salt);
     if (hash !== config.hash) throw new Error('密码错误');
 
-    this.derivedKey = await Crypto.deriveKey(password, config.salt);
+    const key = await Crypto.deriveKey(password, config.salt);
+    await this.loadWithKey(key);
+  },
+  // 用已获得的密钥解密并加载数据（密码解锁与指纹解锁共用）
+  async loadWithKey(key) {
+    this._rawKeyB64 = null;
     const encStr = localStorage.getItem(DATA_KEY);
     if (encStr) {
-      const data = await Crypto.decrypt(JSON.parse(encStr), this.derivedKey);
+      const data = await Crypto.decrypt(JSON.parse(encStr), key);
       Store.loadData(data);
     } else {
       Store.loadData(Store.defaultData());
     }
+    this.derivedKey = key;
     this.isUnlocked = true;
     await Store.bootstrapAfterUnlock();
+  },
+  // 指纹解锁：系统校验通过后取回密钥，无需输入密码
+  async unlockWithBiometric() {
+    const st = await Biometric.status();
+    if (!st.available || !st.enabled) return;
+    const btn = document.getElementById('authBioBtn');
+    if (btn) btn.textContent = '验证中...';
+    try {
+      const secret = await Biometric.unlock();
+      await this.loadWithKey(await Crypto.importRawKey(secret));
+      this._rawKeyB64 = secret;
+      await afterUnlockEnter();
+    } catch (e) {
+      if (e && (e.code === 'KEY_INVALID' || /invalid|失效/i.test(e.message || ''))) {
+        try { await Biometric.disable(); } catch (_) {}
+        await refreshBiometricSetting();
+        toast('指纹信息已变更，请先用密码解锁并重新开启指纹');
+      }
+      // 用户取消/验证失败：留在密码解锁界面，不打扰
+    } finally {
+      if (btn) btn.textContent = '👆 指纹解锁';
+    }
+  },
+  // 登录界面按指纹可用状态显示/自动呼出指纹
+  async refreshAuthBiometric(isLogin) {
+    const btn = document.getElementById('authBioBtn');
+    if (!btn) return;
+    const st = await Biometric.status();
+    const show = isLogin && st.available && st.enabled;
+    btn.style.display = show ? 'inline-flex' : 'none';
+    if (show) setTimeout(() => this.unlockWithBiometric(), 300);
   },
   lock() {
     this.isUnlocked = false;
     this.derivedKey = null;
+    this._rawKeyB64 = null;
     Store.data = Store.defaultData();
     // 尚未设置密码时不能进入解锁流程，否则会要求输入不存在的密码
     const initialized = this.isInitialized();
@@ -1686,6 +2007,13 @@ const Auth = {
       createdAt: config.createdAt, updatedAt: new Date().toISOString()
     }));
     this.derivedKey = newKey;
+    this._rawKeyB64 = null;
+
+    // 密码变更后数据密钥已更换，同步更新指纹保管的密钥
+    try {
+      const st = await Biometric.status();
+      if (st.enabled) await Biometric.enable(await Crypto.exportRawKey(newKey));
+    } catch (e) { /* 指纹失效不影响密码修改 */ }
   },
   scheduleSave(data) {
     clearTimeout(this._saveTimer);
@@ -1748,6 +2076,7 @@ const Auth = {
       document.getElementById('authHint').innerHTML = '密码仅存储加盐哈希值，绝不保存明文<br>密码丢失后数据无法恢复，请妥善保管<br>所有数据使用 AES-256-GCM 本地加密';
     }
     setTimeout(() => pwInput.focus(), 100);
+    this.refreshAuthBiometric(isLogin);
   },
   // 每次启动根据是否存在密码配置决定进入「设置密码」还是「解锁」
   async bootstrap() {
@@ -1764,6 +2093,184 @@ const Auth = {
     } else {
       await this.bootstrap();
     }
+  },
+};
+
+/* ============================================================
+ * 自动化：周期收支 / 自动还款 / 余额补足
+ * 每次解锁时按规则日期回填，生成的流水带 isAuto 标记
+ * ============================================================ */
+function pad2(n) { return String(n).padStart(2, '0'); }
+function daysInMonth(year, month) { return new Date(year, month, 0).getDate(); }
+function monthKeyOf(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; }
+function addMonthKey(key, delta) {
+  const [y, m] = key.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
+
+// 某天是否命中规则（月末截止日：当月无该日期时取最后一天）
+function ruleOccursOn(rule, d) {
+  const freq = rule.freq || 'monthly';
+  if (freq === 'daily') return true;
+  if (freq === 'weekly') {
+    const wd = d.getDay() === 0 ? 7 : d.getDay();
+    return wd === (rule.weekday || 1);
+  }
+  if (freq === 'monthly') {
+    const dom = Math.min(rule.dayOfMonth || 1, daysInMonth(d.getFullYear(), d.getMonth() + 1));
+    return d.getDate() === dom;
+  }
+  const mon = rule.monthOfYear || 1;
+  if (d.getMonth() + 1 !== mon) return false;
+  const dom = Math.min(rule.dayOfMonth || 1, daysInMonth(d.getFullYear(), mon));
+  return d.getDate() === dom;
+}
+
+// 从上次执行日的次日（首次从开始日期）到今天，列出所有命中日期
+function autoOccurrenceDates(rule, todayStr) {
+  const out = [];
+  if (!rule.startDate) return out;
+  let d = new Date(rule.startDate + 'T00:00:00');
+  if (rule.lastRunDate && rule.lastRunDate >= rule.startDate) {
+    d = new Date(rule.lastRunDate + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+  }
+  const today = new Date(todayStr + 'T00:00:00');
+  let guard = 0;
+  while (d <= today && guard++ < 1200) {
+    const ds = fmt.dateFull(d);
+    if ((!rule.endDate || ds <= rule.endDate) && ruleOccursOn(rule, d)) out.push(ds);
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+// 下一次命中的日期（用于列表展示）
+function nextAutoDate(rule, fromStr) {
+  let d = new Date(fromStr + 'T00:00:00');
+  // 已经执行过的日期不再作为「下次」展示
+  if (rule.lastRunDate && rule.lastRunDate >= fromStr) {
+    d = new Date(rule.lastRunDate + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+  }
+  for (let i = 0; i < 800; i++) {
+    const ds = fmt.dateFull(d);
+    if ((!rule.startDate || ds >= rule.startDate) && (!rule.endDate || ds <= rule.endDate) && ruleOccursOn(rule, d)) return ds;
+    d.setDate(d.getDate() + 1);
+  }
+  return '—';
+}
+
+const Automation = {
+  list(cat) {
+    if (!Store.data || !Store.data.automations) return [];
+    return Store.data.automations[cat] || [];
+  },
+  find(cat, id) { return this.list(cat).find(r => r.id === id) || null; },
+
+  run() {
+    if (!Store.data || !Store.data.automations) return [];
+    const todayStr = fmt.dateFull(new Date());
+    let created = 0;
+    let touched = false;
+
+    this.list('recurring').forEach(rule => {
+      if (!rule.enabled) return;
+      const dates = autoOccurrenceDates(rule, todayStr);
+      if (dates.length) {
+        dates.forEach(ds => { this.postRecurring(rule, ds); created++; });
+        rule.lastRunDate = dates[dates.length - 1];
+        touched = true;
+      } else if (rule.endDate && rule.endDate < todayStr && rule.lastRunDate !== rule.endDate) {
+        rule.lastRunDate = rule.endDate;
+        touched = true;
+      }
+    });
+
+    this.list('repay').forEach(rule => {
+      if (!rule.enabled) return;
+      const n = this.runRepay(rule, todayStr);
+      if (n) { created += n; touched = true; }
+    });
+
+    this.list('topup').forEach(rule => {
+      if (!rule.enabled) return;
+      if (this.runTopup(rule, todayStr)) { created++; touched = true; }
+    });
+
+    if (touched) Store.save();
+    return created;
+  },
+
+  postRecurring(rule, dateStr) {
+    const base = { date: dateStr, isAuto: true, autoRuleId: rule.id };
+    if (rule.kind === 'transfer') {
+      if (!rule.accountId || !rule.toAccountId || rule.accountId === rule.toAccountId) return;
+      Store.addTxn({ ...base, type: 'transfer', amount: rule.amount, accountId: rule.accountId,
+        toAccountId: rule.toAccountId, note: rule.note || '周期转账' });
+    } else {
+      if (!rule.accountId) return;
+      Store.addTxn({ ...base, type: rule.kind, amount: rule.amount, accountId: rule.accountId,
+        category: rule.category || (rule.kind === 'income' ? 'other_inc' : 'other_exp'),
+        note: rule.note || (rule.kind === 'income' ? '周期收入' : '周期支出') });
+    }
+  },
+
+  // 自动还款：补齐上次执行月之后、已到还款日的每个月份
+  runRepay(rule, todayStr) {
+    if (!rule.fromAccountId || !rule.toAccountId || rule.fromAccountId === rule.toAccountId) return 0;
+    const today = new Date(todayStr + 'T00:00:00');
+    const currentKey = monthKeyOf(today);
+    let cursor = rule.lastRunMonth ? addMonthKey(rule.lastRunMonth, 1) : addMonthKey(currentKey, -1);
+    let count = 0;
+    let guard = 0;
+    while (cursor <= currentKey && guard++ < 24) {
+      const [y, m] = cursor.split('-').map(Number);
+      const dom = Math.min(rule.dayOfMonth || 1, daysInMonth(y, m));
+      const dateStr = `${y}-${pad2(m)}-${pad2(dom)}`;
+      if (dateStr > todayStr) break;
+      if (this.postRepay(rule, dateStr)) count++;
+      rule.lastRunMonth = cursor;
+      cursor = addMonthKey(cursor, 1);
+    }
+    return count;
+  },
+
+  postRepay(rule, dateStr) {
+    const target = Store.getAccount(rule.toAccountId);
+    const from = Store.getAccount(rule.fromAccountId);
+    if (!target || !from) return false;
+    let amount = 0;
+    if (rule.mode === 'full') {
+      // 负债以负数表示，清零即欠款全额
+      if (target.balance >= 0) return false;
+      amount = Math.round(Math.abs(target.balance) * 100) / 100;
+    } else {
+      amount = Math.round((rule.amount || 0) * 100) / 100;
+    }
+    if (amount <= 0) return false;
+    Store.addTxn({ type: 'transfer', amount, date: dateStr, accountId: rule.fromAccountId,
+      toAccountId: rule.toAccountId, note: rule.note || '自动还款', isAuto: true, autoRuleId: rule.id });
+    return true;
+  },
+
+  // 余额补足：低于阈值时从指定账户转入；同一规则每天最多一次
+  runTopup(rule, todayStr) {
+    if (!rule.fromAccountId || !rule.toAccountId || rule.fromAccountId === rule.toAccountId) return false;
+    if (rule.lastRunDate === todayStr) return false;
+    const target = Store.getAccount(rule.toAccountId);
+    const from = Store.getAccount(rule.fromAccountId);
+    if (!target || !from) return false;
+    const threshold = Number(rule.threshold) || 0;
+    if (target.balance >= threshold) return false;
+    const amount = Math.round((Number(rule.amount) || 0) * 100) / 100;
+    if (amount <= 0) return false;
+    if (from.balance < amount) return false;   // 资金来源不足时不透支
+    Store.addTxn({ type: 'transfer', amount, date: todayStr, accountId: rule.fromAccountId,
+      toAccountId: rule.toAccountId, note: rule.note || '余额补足', isAuto: true, autoRuleId: rule.id });
+    rule.lastRunDate = todayStr;
+    return true;
   },
 };
 
@@ -3124,8 +3631,9 @@ function renderTxnItem(t) {
   const acc = Store.getAccount(t.accountId);
   const noteHtml = t.note ? `<span class="note"> · ${escapeHtml(t.note)}</span>` : '';
   const autoTag = t.isAutoInterest ? '<span style="font-size:.66rem;background:var(--primary-bg);color:var(--primary);padding:1px 6px;border-radius:4px;margin-left:4px;">自动计息</span>' : '';
+  const autoRuleTag = (!t.isAutoInterest && t.isAuto) ? '<span style="font-size:.66rem;background:var(--transfer-bg);color:var(--transfer);padding:1px 6px;border-radius:4px;margin-left:4px;">自动</span>' : '';
   const adjustTag = t.isBalanceAdjust ? '<span style="font-size:.66rem;background:var(--warn-bg);color:#92400e;padding:1px 6px;border-radius:4px;margin-left:4px;">余额调整</span>' : '';
-  const isSystem = t.isAutoInterest || t.isBalanceAdjust;
+  const isSystem = t.isAutoInterest || t.isBalanceAdjust || t.isAuto;
   const actionsHtml = isSystem
     ? `<div class="txn-actions"><button class="del" onclick="deleteTxnConfirm('${t.id}')" title="删除">🗑️</button></div>`
     : `<div class="txn-actions"><button onclick="openTxnModal('${t.id}')" title="编辑">✏️</button><button class="del" onclick="deleteTxnConfirm('${t.id}')" title="删除">🗑️</button></div>`;
@@ -3133,7 +3641,7 @@ function renderTxnItem(t) {
     <div class="txn-item">
       <div class="txn-cat-icon" style="background:${catInfo.color}22;color:${catInfo.color}">${catInfo.emoji}</div>
       <div class="txn-info">
-        <div class="cat">${escapeHtml(catInfo.name)}${autoTag}${adjustTag}</div>
+        <div class="cat">${escapeHtml(catInfo.name)}${autoTag}${autoRuleTag}${adjustTag}</div>
         <div class="meta">${fmt.date(t.date)} · ${escapeHtml(acc?.name || '未知')}${noteHtml}</div>
       </div>
       <div class="txn-amount ${amountClass}">${amountText}</div>
@@ -3705,23 +4213,7 @@ async function authSubmit() {
     } else {
       await Auth.setup(pw);
     }
-    Auth.hideAuth();
-    navigateTo('dashboard');
-    if (Store._interestRefreshed) {
-      const r = Store._interestRefreshed;
-      toast(`已自动结算 ${r.count} 笔利息，合计 ¥${fmt.money(r.total)}`);
-    }
-    // 利率数据源失效提示：主力失效已自动切换，引导用户补齐备选
-    const rf = Store._rateFeedReport;
-    if (rf && rf.failover) {
-      toast(`数据源「${rf.failover.failedName}」失效，已切换到「${rf.failover.promotedName}」`);
-      setTimeout(() => openRateSourceModal(true), 1100);
-    } else if (rf && rf.failed.length) {
-      toast('部分利率暂时无法获取，已使用内置近似值');
-    }
-    checkMonthlyReconcile();
-    // 解锁后静默检查更新，不打断首次进入
-    setTimeout(() => UpdateChecker.check(false), 1200);
+    await afterUnlockEnter();
   } catch(e) {
     errorEl.textContent = e.message;
     pwInput.classList.add('error');
@@ -3734,10 +4226,376 @@ async function authSubmit() {
   }
 }
 
+// 解锁成功后的统一收尾（密码与指纹共用）
+async function afterUnlockEnter() {
+  Auth.hideAuth();
+  navigateTo('dashboard');
+  if (Store._interestRefreshed) {
+    const r = Store._interestRefreshed;
+    toast(`已自动结算 ${r.count} 笔利息，合计 ¥${fmt.money(r.total)}`);
+  }
+  if (Store._autoCreated) {
+    const n = Store._autoCreated;
+    setTimeout(() => toast(`已自动入账 ${n} 笔（周期收支/自动还款/余额补足）`), 900);
+  }
+  // 利率数据源失效提示：主力失效已自动切换，引导用户补齐备选
+  const rf = Store._rateFeedReport;
+  if (rf && rf.failover) {
+    toast(`数据源「${rf.failover.failedName}」失效，已切换到「${rf.failover.promotedName}」`);
+    setTimeout(() => openRateSourceModal(true), 1100);
+  } else if (rf && rf.failed.length) {
+    toast('部分利率暂时无法获取，已使用内置近似值');
+  }
+  checkMonthlyReconcile();
+  // 解锁后静默检查更新，不打断首次进入
+  setTimeout(() => UpdateChecker.check(false), 1200);
+}
+
 function openSettingsModal() {
   const verEl = document.getElementById('settingsVersion');
   if (verEl) verEl.textContent = UpdateChecker.VERSION_NAME;
+  refreshBiometricSetting();
   openModal('settingsModalOverlay');
+}
+
+/* ============================================================
+ * 指纹解锁设置
+ * ============================================================ */
+async function refreshBiometricSetting() {
+  const item = document.getElementById('biometricSettingItem');
+  if (!item) return;
+  const st = await Biometric.status();
+  if (!st.available) { item.style.display = 'none'; return; }
+  item.style.display = 'flex';
+  const stateEl = document.getElementById('biometricSettingState');
+  const descEl = document.getElementById('biometricSettingDesc');
+  stateEl.textContent = st.enabled ? '已开启' : '关闭';
+  stateEl.classList.toggle('on', st.enabled);
+  descEl.textContent = st.enabled ? '下次启动可直接使用指纹解锁' : '使用手机指纹快速解锁应用';
+}
+
+async function toggleBiometric() {
+  const st = await Biometric.status();
+  if (!st.available) { toast('当前设备不支持指纹识别'); return; }
+  try {
+    if (st.enabled) {
+      await Biometric.disable();
+      toast('已关闭指纹解锁');
+    } else {
+      if (!Auth.derivedKey) { toast('请先解锁应用'); return; }
+      // 指纹解锁得到的密钥不可导出，优先使用解锁时缓存的原始密钥
+      const secret = Auth._rawKeyB64 || await Crypto.exportRawKey(Auth.derivedKey);
+      await Biometric.enable(secret);
+      toast('指纹解锁已开启');
+    }
+  } catch (e) {
+    toast(e.message || '操作失败');
+  }
+  await refreshBiometricSetting();
+}
+
+/* ============================================================
+ * 自动化规则 UI
+ * ============================================================ */
+let autoTab = 'recurring';
+let editingAuto = { cat: null, id: null };
+let autoFormType = 'expense';
+
+function openAutomationModal() {
+  autoTab = 'recurring';
+  syncAutoTabs();
+  renderAutoList();
+  openModal('automationModalOverlay');
+}
+
+function switchAutoTab(tab) {
+  autoTab = tab;
+  syncAutoTabs();
+  renderAutoList();
+}
+
+function syncAutoTabs() {
+  document.querySelectorAll('#autoTabs .type-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.autoTab === autoTab);
+  });
+}
+
+function autoAccountOptions(filterFn, selectedId) {
+  const accs = Store.getAccounts().filter(a => !filterFn || filterFn(a));
+  if (!accs.length) return '<option value="">无可用账户</option>';
+  return accs.map(a => `<option value="${a.id}"${a.id === selectedId ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
+}
+
+function autoAccName(id) { return (Store.getAccount(id) || {}).name || '未知账户'; }
+
+function autoFreqText(rule) {
+  if (rule.freq === 'daily') return '每天';
+  if (rule.freq === 'weekly') return `每周${['一', '二', '三', '四', '五', '六', '日'][(rule.weekday || 1) - 1]}`;
+  if (rule.freq === 'yearly') return `每年${rule.monthOfYear}月${rule.dayOfMonth}日`;
+  return `每月${rule.dayOfMonth}日`;
+}
+
+function nextRepayDate(rule, todayStr) {
+  const today = new Date(todayStr + 'T00:00:00');
+  let cursor = rule.lastRunMonth ? addMonthKey(rule.lastRunMonth, 1) : monthKeyOf(today);
+  for (let i = 0; i < 24; i++) {
+    const [y, m] = cursor.split('-').map(Number);
+    const dom = Math.min(rule.dayOfMonth || 1, daysInMonth(y, m));
+    const ds = `${y}-${pad2(m)}-${pad2(dom)}`;
+    if (ds > todayStr) return ds;
+    cursor = addMonthKey(cursor, 1);
+  }
+  return '—';
+}
+
+function renderAutoList() {
+  const el = document.getElementById('autoList');
+  if (!el) return;
+  const list = Automation.list(autoTab);
+  if (!list.length) {
+    const tips = {
+      recurring: '还没有周期收支<br>例如每月工资、每月房贷',
+      repay: '还没有自动还款<br>例如每月从储蓄卡还信用卡',
+      topup: '还没有余额补足<br>例如交通卡余额低于 50 元时自动充 100 元',
+    };
+    el.innerHTML = `<div class="auto-empty">${tips[autoTab]}</div>`;
+    return;
+  }
+  const todayStr = fmt.dateFull(new Date());
+  el.innerHTML = list.map(r => {
+    let icon = '⚙️', title = '', sub = '';
+    if (autoTab === 'recurring') {
+      icon = r.kind === 'income' ? '💰' : (r.kind === 'expense' ? '💸' : '🔄');
+      title = r.note || (r.kind === 'income' ? '周期收入' : (r.kind === 'expense' ? '周期支出' : '周期转账'));
+      const route = r.kind === 'transfer'
+        ? `${autoAccName(r.accountId)} → ${autoAccName(r.toAccountId)}`
+        : autoAccName(r.accountId);
+      sub = `${autoFreqText(r)} · ¥${fmt.money(r.amount)} · ${route}<br>下次：${nextAutoDate(r, todayStr)}`;
+    } else if (autoTab === 'repay') {
+      icon = '💳';
+      title = r.note || '自动还款';
+      sub = `每月${r.dayOfMonth}日 · ${r.mode === 'full' ? '还清全部欠款' : `固定 ¥${fmt.money(r.amount || 0)}`}<br>${autoAccName(r.fromAccountId)} → ${autoAccName(r.toAccountId)} · 下次：${nextRepayDate(r, todayStr)}`;
+    } else {
+      icon = '🔄';
+      title = r.note || '余额补足';
+      sub = `余额低于 ¥${fmt.money(r.threshold || 0)} 时，从 ${autoAccName(r.fromAccountId)} 转入 ¥${fmt.money(r.amount || 0)}<br>每次打开应用检查（每天最多一次）`;
+    }
+    return `
+      <div class="auto-card ${r.enabled ? '' : 'off'}">
+        <div class="auto-card-top">
+          <div class="auto-card-title">${icon} ${escapeHtml(title)}</div>
+          <span class="setting-state ${r.enabled ? 'on' : ''}" onclick="toggleAutoRule('${r.id}')">${r.enabled ? '已开启' : '已停用'}</span>
+          <div class="auto-card-acts">
+            <button onclick="openAutoForm('${r.id}')" title="编辑">✏️</button>
+            <button class="del" onclick="deleteAutoRule('${r.id}')" title="删除">🗑️</button>
+          </div>
+        </div>
+        <div class="auto-card-sub">${sub}</div>
+      </div>`;
+  }).join('');
+}
+
+function toggleAutoRule(id) {
+  const r = Automation.find(autoTab, id);
+  if (!r) return;
+  r.enabled = !r.enabled;
+  Store.save();
+  renderAutoList();
+  toast(r.enabled ? '规则已开启' : '规则已停用');
+}
+
+function deleteAutoRule(id) {
+  if (!confirm('确定删除这条自动化规则吗？已自动入账的记录不会被删除。')) return;
+  const list = Automation.list(autoTab);
+  const i = list.findIndex(r => r.id === id);
+  if (i >= 0) list.splice(i, 1);
+  Store.save();
+  renderAutoList();
+  toast('规则已删除');
+}
+
+function openAutoForm(id) {
+  const rule = id ? Automation.find(autoTab, id) : null;
+  editingAuto = { cat: autoTab, id: id || null };
+  if (autoTab === 'recurring') {
+    document.getElementById('autoRecurringTitle').textContent = id ? '编辑周期收支' : '新增周期收支';
+    setAutoType(rule ? rule.kind : 'expense');
+    document.getElementById('autoAmount').value = rule ? rule.amount : '';
+    document.getElementById('autoFreq').value = rule ? (rule.freq || 'monthly') : 'monthly';
+    document.getElementById('autoAccountFrom').innerHTML = autoAccountOptions(null, rule ? rule.accountId : '');
+    document.getElementById('autoAccountTo').innerHTML = autoAccountOptions(null, rule ? rule.toAccountId : '');
+    if (rule && rule.category) document.getElementById('autoCategory').value = rule.category;
+    document.getElementById('autoWeekday').value = rule ? (rule.weekday || 1) : 1;
+    document.getElementById('autoDay').value = rule ? (rule.dayOfMonth || 1) : 1;
+    document.getElementById('autoMonth').value = rule ? (rule.monthOfYear || 1) : 1;
+    document.getElementById('autoStart').value = rule ? rule.startDate : fmt.dateFull(new Date());
+    document.getElementById('autoEnd').value = rule ? (rule.endDate || '') : '';
+    document.getElementById('autoNote').value = rule ? (rule.note || '') : '';
+    updateAutoFreqFields();
+    openModal('autoRecurringOverlay');
+  } else if (autoTab === 'repay') {
+    document.getElementById('autoRepayTitle').textContent = id ? '编辑自动还款' : '新增自动还款';
+    document.getElementById('repayTarget').innerHTML = autoAccountOptions(a => isLiability(a), rule ? rule.toAccountId : '');
+    document.getElementById('repayFrom').innerHTML = autoAccountOptions(a => !isLiability(a), rule ? rule.fromAccountId : '');
+    document.getElementById('repayDay').value = rule ? rule.dayOfMonth : 8;
+    document.getElementById('repayMode').value = rule ? (rule.mode || 'full') : 'full';
+    document.getElementById('repayAmount').value = rule ? (rule.amount || '') : '';
+    document.getElementById('repayNote').value = rule ? (rule.note || '') : '';
+    updateRepayModeFields();
+    openModal('autoRepayOverlay');
+  } else {
+    document.getElementById('autoTopupTitle').textContent = id ? '编辑余额补足' : '新增余额补足';
+    document.getElementById('topupTarget').innerHTML = autoAccountOptions(a => !isLiability(a), rule ? rule.toAccountId : '');
+    document.getElementById('topupThreshold').value = rule ? (rule.threshold || '') : '';
+    document.getElementById('topupAmount').value = rule ? (rule.amount || '') : '';
+    document.getElementById('topupFrom').innerHTML = autoAccountOptions(a => !isLiability(a), rule ? rule.fromAccountId : '');
+    document.getElementById('topupNote').value = rule ? (rule.note || '') : '';
+    openModal('autoTopupOverlay');
+  }
+}
+
+function setAutoType(type) {
+  autoFormType = type;
+  document.querySelectorAll('#autoTypeTabs .type-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.autoType === type);
+  });
+  const isTransfer = type === 'transfer';
+  document.getElementById('autoCategoryGroup').style.display = isTransfer ? 'none' : 'block';
+  document.getElementById('autoAccountToGroup').style.display = isTransfer ? 'block' : 'none';
+  document.getElementById('autoAccountFromLabel').textContent = isTransfer ? '转出账户' : '账户';
+  if (!isTransfer) {
+    const cats = Store.getCategories(type);
+    document.getElementById('autoCategory').innerHTML = cats.map(c => `<option value="${c.id}">${c.emoji} ${c.name}</option>`).join('');
+  }
+}
+
+function updateAutoFreqFields() {
+  const f = document.getElementById('autoFreq').value;
+  document.getElementById('autoWeekdayGroup').style.display = f === 'weekly' ? 'block' : 'none';
+  document.getElementById('autoDayGroup').style.display = (f === 'weekly' || f === 'daily') ? 'none' : 'block';
+  document.getElementById('autoMonthGroup').style.display = f === 'yearly' ? 'block' : 'none';
+  document.querySelector('#autoDayGroup .form-label').textContent =
+    f === 'yearly' ? '几号（当年该月没有此日期时取月末）' : '每月几号（当月没有该日期时取月末）';
+}
+
+function updateRepayModeFields() {
+  document.getElementById('repayAmountGroup').style.display =
+    document.getElementById('repayMode').value === 'fixed' ? 'block' : 'none';
+}
+
+function saveAutoRecurring() {
+  const amount = Math.round((parseFloat(document.getElementById('autoAmount').value) || 0) * 100) / 100;
+  const accountId = document.getElementById('autoAccountFrom').value;
+  const toAccountId = document.getElementById('autoAccountTo').value;
+  const startDate = document.getElementById('autoStart').value;
+  const endDate = document.getElementById('autoEnd').value;
+  const freq = document.getElementById('autoFreq').value;
+  const day = parseInt(document.getElementById('autoDay').value, 10) || 1;
+  const month = parseInt(document.getElementById('autoMonth').value, 10) || 1;
+  const weekday = parseInt(document.getElementById('autoWeekday').value, 10) || 1;
+
+  if (amount <= 0) { toast('请输入大于 0 的金额'); return; }
+  if (!accountId) { toast('请选择账户'); return; }
+  if (autoFormType === 'transfer' && (!toAccountId || toAccountId === accountId)) { toast('请选择不同的转入账户'); return; }
+  if (!startDate) { toast('请选择开始日期'); return; }
+  if (day < 1 || day > 31) { toast('日期需在 1-31 之间'); return; }
+  if (endDate && endDate < startDate) { toast('结束日期不能早于开始日期'); return; }
+
+  const old = editingAuto.id ? Automation.find('recurring', editingAuto.id) : null;
+  const rule = {
+    id: old ? old.id : 'auto_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    kind: autoFormType,
+    amount,
+    category: autoFormType === 'transfer' ? '' : document.getElementById('autoCategory').value,
+    accountId,
+    toAccountId: autoFormType === 'transfer' ? toAccountId : '',
+    freq, weekday,
+    dayOfMonth: day,
+    monthOfYear: month,
+    startDate, endDate,
+    note: document.getElementById('autoNote').value.trim(),
+    enabled: old ? old.enabled : true,
+    lastRunDate: old ? old.lastRunDate : '',
+    createdAt: old ? old.createdAt : new Date().toISOString(),
+  };
+
+  if (old) Object.assign(old, rule);
+  else Automation.list('recurring').push(rule);
+
+  closeModal('autoRecurringOverlay');
+  const n = Automation.run();
+  renderAutoList();
+  toast(n ? `规则已保存，已自动入账 ${n} 笔` : '规则已保存');
+  refreshCurrentPage();
+}
+
+function saveAutoRepay() {
+  const toAccountId = document.getElementById('repayTarget').value;
+  const fromAccountId = document.getElementById('repayFrom').value;
+  const day = parseInt(document.getElementById('repayDay').value, 10) || 1;
+  const mode = document.getElementById('repayMode').value;
+  const amount = Math.round((parseFloat(document.getElementById('repayAmount').value) || 0) * 100) / 100;
+
+  if (!toAccountId) { toast('请选择还款账户（负债类）'); return; }
+  if (!fromAccountId) { toast('请选择资金来源账户'); return; }
+  if (fromAccountId === toAccountId) { toast('资金来源不能是还款账户本身'); return; }
+  if (day < 1 || day > 31) { toast('还款日需在 1-31 之间'); return; }
+  if (mode === 'fixed' && amount <= 0) { toast('请输入固定的还款金额'); return; }
+
+  const old = editingAuto.id ? Automation.find('repay', editingAuto.id) : null;
+  const today = new Date();
+  const todayStr = fmt.dateFull(today);
+  const thisMonth = monthKeyOf(today);
+  const scheduled = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(Math.min(day, daysInMonth(today.getFullYear(), today.getMonth() + 1)))}`;
+
+  const rule = {
+    id: old ? old.id : 'auto_repay_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    fromAccountId, toAccountId, dayOfMonth: day, mode,
+    amount: mode === 'fixed' ? amount : 0,
+    note: document.getElementById('repayNote').value.trim(),
+    enabled: old ? old.enabled : true,
+    // 新建规则从下一个还款日开始，避免创建后立刻补扣本月
+    lastRunMonth: old ? old.lastRunMonth : (scheduled <= todayStr ? thisMonth : addMonthKey(thisMonth, -1)),
+  };
+
+  if (old) Object.assign(old, rule);
+  else Automation.list('repay').push(rule);
+
+  closeModal('autoRepayOverlay');
+  const n = Automation.run();
+  renderAutoList();
+  toast(n ? `规则已保存，已自动入账 ${n} 笔` : '规则已保存');
+  refreshCurrentPage();
+}
+
+function saveAutoTopup() {
+  const toAccountId = document.getElementById('topupTarget').value;
+  const fromAccountId = document.getElementById('topupFrom').value;
+  const threshold = Math.round((parseFloat(document.getElementById('topupThreshold').value) || 0) * 100) / 100;
+  const amount = Math.round((parseFloat(document.getElementById('topupAmount').value) || 0) * 100) / 100;
+
+  if (!toAccountId) { toast('请选择需要补足的账户'); return; }
+  if (!fromAccountId) { toast('请选择资金来源账户'); return; }
+  if (fromAccountId === toAccountId) { toast('资金来源不能是被补足的账户'); return; }
+  if (amount <= 0) { toast('请输入转入金额'); return; }
+
+  const old = editingAuto.id ? Automation.find('topup', editingAuto.id) : null;
+  const rule = {
+    id: old ? old.id : 'auto_topup_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    toAccountId, fromAccountId, threshold, amount,
+    note: document.getElementById('topupNote').value.trim(),
+    enabled: old ? old.enabled : true,
+    lastRunDate: old ? old.lastRunDate : '',
+  };
+
+  if (old) Object.assign(old, rule);
+  else Automation.list('topup').push(rule);
+
+  closeModal('autoTopupOverlay');
+  const n = Automation.run();
+  renderAutoList();
+  toast(n ? `规则已保存，已自动入账 ${n} 笔` : '规则已保存');
+  refreshCurrentPage();
 }
 
 async function changePassword() {
@@ -3803,8 +4661,8 @@ async function importData(event) {
  * ============================================================ */
 const UpdateChecker = {
   // 与 android/app/build.gradle 保持一致，由发版脚本自动同步
-  VERSION_CODE: 9,
-  VERSION_NAME: '1.0.8',
+  VERSION_CODE: 10,
+  VERSION_NAME: '1.0.9',
 
   // 更新源：优先 jsDelivr（国内可达），失败回退 GitHub 原生地址
   MANIFEST_URLS: [

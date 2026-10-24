@@ -1,8 +1,8 @@
 {
-    "versionCode":  9,
-    "versionName":  "1.0.8",
-    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.8.apk",
-    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.8.apk",
-    "changelog":  "明细排序改为先按记录内设置的日期倒序、同一天再按保存时间倒序；当日多笔自动计息折叠为一条汇总展示，点击可展开查看各账户明细（同日触发时间不同也会汇总）",
-    "publishedAt":  "2026-10-23"
+    "versionCode":  10,
+    "versionName":  "1.0.9",
+    "apkUrl":  "https://cdn.jsdelivr.net/gh/LNworkS/PFO@main/releases/PFO-1.0.9.apk",
+    "apkUrlFallback":  "https://raw.githubusercontent.com/LNworkS/PFO/main/releases/PFO-1.0.9.apk",
+    "changelog":  "新增：指纹解锁（设置内开启，密码始终可后备）；设置内新增「自动化」，支持周期收支（月/周/日/年）、自动还款（预设金额或还清全部欠款）、余额补足（低于阈值自动转入）；打开应用时自动补记到期条目，明细标注「自动」",
+    "publishedAt":  "2026-10-25"
 }
